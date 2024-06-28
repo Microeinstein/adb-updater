@@ -145,20 +145,12 @@ def ZlibDecompStream(fileobj: io.RawIOBase):
     return RawIterStream(chunked())
 
 
-# def chunk_read_lines(iter):
-#     sio = io.StringIO()
-#     for chunk in iter:
-#         sio.write(chunk)
-#         sio.seek(0)
-#         line2 = None
-#         for i, line in enumerate(sio):
-#             if i > 0:
-#                 yield line2
-#             line2 = line
-#         sio = io.StringIO()
-#         sio.write(line2)
-#     sio.seek(0)
-#     yield from sio
+def chunked_stream(stream: io.RawIOBase, chunksize=1024 * 4 * 4) -> bytes:
+    while True:
+        c = stream.read(chunksize)
+        if not c:
+            break
+        yield c
 
 
 @dataclass
@@ -189,7 +181,7 @@ class AndroidPhone:
         return self.device.BytesStreamingShell(f"bu backup -keyvalue {package}")
     
     @staticmethod
-    def get_file_from_backup(bytes_iter, path: str) -> bytes:
+    def get_file_from_backup(bytes_iter, path: str) -> tarfile.ExFileObject:
         # dd if=fdroid.backup bs=24 skip=1 | zlib-flate -uncompress | tar -vxf -
         bkp = RawIterStream(bytes_iter)
         head = bkp.read(24)
@@ -197,7 +189,11 @@ class AndroidPhone:
             raise RuntimeError(f"Unknown backup format: {head!r}")
         bkp = ZlibDecompStream(bkp)
         bkp = tarfile.open(fileobj=bkp, mode='r|')
-        print(bkp.list())
+        # NOTE: in streaming mode you must iterate members this way,
+        # otherwise tar needs to seek backwards
+        for member in bkp:
+            if member.path == path:
+                return bkp.extractfile(member)
     
     def get_dumpsys_packages(self):
         return chunk_read_lines(self.device.StreamingShell('dumpsys package packages'))
@@ -214,8 +210,8 @@ class FDroidRepo:
     cache_path: Path = field(init=False)
 
     @classmethod
-    def read_from_backup(cls):
-        con = sqlite3.connect("apps/org.fdroid.fdroid/db/fdroid_db")
+    def read_from_backup(cls, path):
+        con = sqlite3.connect(path)
         cur = con.cursor()
         res = cur.execute("SELECT name, address FROM CoreRepository")
         while True:
@@ -223,7 +219,7 @@ class FDroidRepo:
             if row is None:
                 break
             name, addr = row
-            name = json_stream.load(StringIO(name))
+            name = json_stream.load(io.StringIO(name))
             name = name['en-US']
             yield cls(name, addr+'/')
         con.close()
@@ -307,6 +303,9 @@ class AndroidApp:
 
 
 async def main(arg0, *args):
+    FDROID_BKP_DB = 'apps/org.fdroid.fdroid/db/fdroid_db'
+    FDROID_DB = os.path.basename(FDROID_BKP_DB)
+    
     # phone = AndroidPhone.try_connect()
     # if not phone:
     #     print("No phone connected.")
@@ -314,25 +313,20 @@ async def main(arg0, *args):
     
     # phone.get_package_backup('org.fdroid.fdroid')
     with open('fdroid.backup', 'rb') as fin:
-        def chunked():
-            while True:
-                c = fin.read(4096)
-                if not c:
-                    break
-                yield c
+        db_data = AndroidPhone.get_file_from_backup(chunked_stream(fin), FDROID_BKP_DB)
         
-        AndroidPhone.get_file_from_backup(
-            chunked(),
-            'apps/org.fdroid.fdroid/db/fdroid_db'
-        )
-        return
+        with open(FDROID_DB, 'wb') as fout:
+            for chunk in chunked_stream(db_data):
+                fout.write(chunk)
     
     
-    # repos = list(FDroidRepo.read_from_backup())
+    repos = list(FDroidRepo.read_from_backup(FDROID_DB))
     
-    # print("Repositories:")
-    # for r in repos:
-    #     print(f"  {r.name:<40s} {r.address}")
+    print("Repositories:")
+    for r in repos:
+        print(f"  {r.name:<40s} {r.address}")
+    
+    return
     
     # print()
     # print("Updating repos...")
