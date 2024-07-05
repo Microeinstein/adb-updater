@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 
-import sys, os, io, re, sqlite3, zlib, tarfile, asyncio, atexit
+import sys, os, io, re, sqlite3, zlib, tarfile, asyncio
 import aiohttp, json_stream
 
 from abc import ABC
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin
-from typing import List, Optional, Iterable, AnyStr
+from typing import List, Dict, Optional, Iterable, AnyStr, Any
 
 from adb import adb_commands, sign_cryptography
 from adb import usb_exceptions as usb_ex
 
+
+SELFDIR = Path(os.path.dirname(os.path.realpath(__file__)))
+LISTER_JAR = Path(SELFDIR) / 'dex-lister/build/lister.jar'
+LISTER_MAIN = 'net.micro.adb.Lister.Lister'
+
+
+######## UTILS ########
 
 RGX_URL = re.compile(r"^[^:/]+://([^?#]+)([?#].*)?$")
 
@@ -49,6 +56,8 @@ async def try_get_url(session, dir, url, new_ts: int = None):
         return fpath
 
 
+######## STREAMS ########
+
 @dataclass
 class IterStream(ABC):
     iter: Iterable
@@ -68,13 +77,18 @@ class IterStream(ABC):
     def _read_limiter(self, buffer):
         return False
     
+    def close(self):
+        flush_stream(self)
+        super().close()
+    
     def read(self, size=-1, /) -> io.IOBase:
         buffer = self.leftover
         cur = buffer.seek(0, io.SEEK_END)
         
         try:
             while (size < 0 or cur < size) and not self._read_limiter(buffer):
-                cur += buffer.write(next(self.iter))
+                data = next(self.iter)
+                cur += buffer.write(data)
         except StopIteration:
             pass
         
@@ -96,7 +110,7 @@ class TextIterStream(IterStream, io.TextIOBase):
     _line: str
     
     def _seek_to_cut(self, buffer, size):
-        self._line = buffer.readline()
+        self._line = buffer.readline(size)
     
     def _read_limiter(self, buffer):
         return buffer.tell() > 0
@@ -117,7 +131,7 @@ class TextIterStream(IterStream, io.TextIOBase):
         return self._line
     
     def read(self, size=-1, /) -> str:
-        raise NotImplementedError()
+        return super().read(size).getvalue()
 
 
 class RawIterStream(IterStream, io.RawIOBase):
@@ -136,7 +150,18 @@ class RawIterStream(IterStream, io.RawIOBase):
 
 def ZlibDecompStream(fileobj: io.RawIOBase):
     def chunked():
-        dec = zlib.decompressobj()
+        dec = zlib.decompressobj(wbits=15)
+        while True:
+            raw = dec.decompress(fileobj.read(1024 * 4 * 4))
+            if not raw:
+                break
+            yield raw
+    return RawIterStream(chunked())
+
+
+def GzipDecompStream(fileobj: io.RawIOBase):
+    def chunked():
+        dec = zlib.decompressobj(wbits=47)
         while True:
             raw = dec.decompress(fileobj.read(1024 * 4 * 4))
             if not raw:
@@ -153,12 +178,44 @@ def chunked_stream(stream: io.RawIOBase, chunksize=1024 * 4 * 4) -> bytes:
         yield c
 
 
+def flush_stream(stream: io.IOBase):
+    if isinstance(stream, io.RawIOBase):
+        stream: io.RawIOBase
+        while stream.read(4096):
+            pass
+    else:
+        while stream.readline():
+            pass
+
+
+######## PROGRAM ########
+
 @dataclass
+class PropMessage:
+    msg: str
+    default: Any = field(default=None)
+
+    def __set_name__(self, owner, name):
+        self.pub = name
+        self.priv = '_' + name
+
+    def __get__(self, obj, objtype=None):
+        value = getattr(obj, self.priv, self.default)
+        if not value:
+            raise RuntimeError(self.msg)
+        return value
+
+    def __set__(self, obj, value):
+        setattr(obj, self.priv, value)
+
+
 class AndroidPhone:
-    device: adb_commands.AdbCommands
+    TMP = '/data/local/tmp'
     
-    @classmethod
-    def try_connect(cls):
+    device: adb_commands.AdbCommands = PropMessage("Phone is not connected.")  
+
+
+    def __enter__(self):
         local_key = os.path.expanduser('~/.android/adbkey')
         
         if Path(local_key).exists():
@@ -169,21 +226,44 @@ class AndroidPhone:
         
         try:
             device = adb_commands.AdbCommands()
-            atexit.register(lambda: device.Close())
             device.ConnectDevice(rsa_keys=[signer])
         except usb_ex.DeviceNotFoundError as ex:
             print(ex.args[0])
             return None
         
-        return cls(device)
+        self.device = device
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.device.Close()
+        self.device = None
+        # suppress error -> return True
+    
+    
+    def get_dumpsys_packages(self) -> io.IOBase:
+        text_iter = self.device.StreamingShell('dumpsys package packages')
+        return TextIterStream(text_iter)
+    
+    def get_package_list(self):
+        lister_fn = os.path.basename(LISTER_JAR)
+        dest = f"{AndroidPhone.TMP}/{lister_fn}"
         
-    def get_package_backup(self, package: str):
-        return self.device.BytesStreamingShell(f"bu backup -keyvalue {package}")
+        self.device.Push(str(LISTER_JAR), dest, timeout_ms=30000)
+        
+        text_iter = self.device.StreamingShell(f"CLASSPATH={dest!r} app_process / {LISTER_MAIN!r}")
+        
+        txt = TextIterStream(text_iter)
+        js = json_stream.load(txt)
+        for japp in js:
+            yield json_stream.to_standard_types(japp)
+        
+    def get_package_backup(self, package: str) -> io.RawIOBase:
+        bytes_iter = self.device.BytesStreamingShell(f"bu backup -keyvalue {package}")
+        return RawIterStream(bytes_iter)
     
     @staticmethod
-    def get_file_from_backup(bytes_iter, path: str) -> tarfile.ExFileObject:
+    def get_file_from_backup(bkp: io.RawIOBase, path: str) -> tarfile.ExFileObject:
         # dd if=fdroid.backup bs=24 skip=1 | zlib-flate -uncompress | tar -vxf -
-        bkp = RawIterStream(bytes_iter)
         head = bkp.read(24)
         if not head.startswith(b'ANDROID BACKUP'):
             raise RuntimeError(f"Unknown backup format: {head!r}")
@@ -194,74 +274,27 @@ class AndroidPhone:
         for member in bkp:
             if member.path == path:
                 return bkp.extractfile(member)
-    
-    def get_dumpsys_packages(self):
-        return chunk_read_lines(self.device.StreamingShell('dumpsys package packages'))
-
-
-@dataclass
-class FDroidRepo:
-    CACHE_DIR = './cache'
-    JSON_INDEX_V1 = 'index-v1.json'
-    JSON_ENTRY = 'entry.json'
-
-    name: str
-    address: str
-    cache_path: Path = field(init=False)
-
-    @classmethod
-    def read_from_backup(cls, path):
-        con = sqlite3.connect(path)
-        cur = con.cursor()
-        res = cur.execute("SELECT name, address FROM CoreRepository")
-        while True:
-            row = res.fetchone()
-            if row is None:
-                break
-            name, addr = row
-            name = json_stream.load(io.StringIO(name))
-            name = name['en-US']
-            yield cls(name, addr+'/')
-        con.close()
-
-    async def update_repo(self):
-        async with aiohttp.ClientSession() as session:
-            entry_path = await try_get_url(
-                session, FDroidRepo.CACHE_DIR,
-                urljoin(self.address, FDroidRepo.JSON_ENTRY)
-            )
-            
-            if not entry_path:
-                self.cache_path = await try_get_url(
-                    session, FDroidRepo.CACHE_DIR,
-                    urljoin(self.address, FDroidRepo.JSON_INDEX_V1)
-                )
-                return
-            
-            with open(entry_path, 'r') as fentry:
-                jentry = json_stream.load(fentry)
-                tstamp = int(jentry['timestamp']) / 1000
-                i2name = jentry['index']['name']
-                self.cache_path = await try_get_url(
-                    session, FDroidRepo.CACHE_DIR,
-                    urljoin(self.address, i2name), tstamp
-                )
-                return
 
 
 @dataclass
 class AndroidApp:
+    package: str
+    version_code: str
+    label: str
+    
+
+@dataclass
+class InstalledApp(AndroidApp):
     RGX_ATTR = re.compile(r"^[ \t]+([a-z]+)=(.*)$", re.I)
     RGX_PKG  = re.compile(r"[^ ]+\{[^ ]+ ([^ ]+)\}.*$", re.I)
     RGX_VER  = re.compile(r"([^ ]+).*$", re.I)
     
-    package: str
-    version_code: str
     system: bool
     installer: Optional[str] = None
     
     @classmethod
-    def fetch_foreign_apps(cls, text_iter):
+    def _fetch_foreign_apps(cls, text_iter):
+        raise RuntimeError("deprecated")
         data = dict()
         ignore = False
         
@@ -293,56 +326,155 @@ class AndroidApp:
             yield cls(**data)
     
     @classmethod
+    def from_lister(cls, japp: Dict) -> "InstalledApp":
+        return InstalledApp(
+            package      = japp['pkg'],
+            version_code = japp['vcode'],
+            label        = japp['label'],
+            system       = japp['system'],
+            # removed      = japp['removed'],
+            installer    = japp['installer'],
+        )
+        
+    @classmethod
     def print_apps_table(cls, apps):
         apps = sorted(
             filter(lambda a: not a.system and a.installer, apps),
             key=lambda a: (a.installer, a.package)
         )
         for a in apps:
-            print(f"  {a.package:<50} {a.version_code:<12} {a.system:<5} {a.installer}")
+            a: InstalledApp
+            print(f"  {a.label:<50} {a.version_code or '--':<12} {a.system:<5} {a.installer}")
 
 
-async def main(arg0, *args):
+@dataclass
+class FDroidApp(AndroidApp):
+    ...
+
+
+@dataclass
+class FDroidRepo:
+    JSON_INDEX_V1 = 'index-v1.json'
+    JSON_ENTRY = 'entry.json'
+
+    base_dir: Path
+    name: str
+    address: str
+    cache_path: Path = field(init=False)
+    apps: Dict[str, AndroidApp]
+
+    @classmethod
+    def read_from_backup(cls, path, base_dir) -> "FDroidRepo":
+        con = sqlite3.connect(path)
+        cur = con.cursor()
+        res = cur.execute("SELECT name, address FROM CoreRepository")
+        while True:
+            row = res.fetchone()
+            if row is None:
+                break
+            name, addr = row
+            name = json_stream.load(io.StringIO(name))
+            name = name['en-US']
+            yield cls(base_dir, name, addr+'/')
+        con.close()
+
+    async def update_repo(self):
+        async with aiohttp.ClientSession() as session:
+            entry_path = await try_get_url(
+                session, self.base_dir,
+                urljoin(self.address, self.JSON_ENTRY)
+            )
+            
+            if not entry_path:
+                self.cache_path = await try_get_url(
+                    session, self.base_dir,
+                    urljoin(self.address, self.JSON_INDEX_V1)
+                )
+                return
+            
+            with open(entry_path, 'r') as fentry:
+                jentry = json_stream.load(fentry)
+                tstamp = int(jentry['timestamp']) / 1000
+                i2name = jentry['index']['name']
+                self.cache_path = await try_get_url(
+                    session, self.base_dir,
+                    urljoin(self.address, i2name), tstamp
+                )
+                return
+    
+    def load_repo_apps(self):
+        ...
+
+
+class Updater():
+    CACHE = Path('cache')
     FDROID_BKP_DB = 'apps/org.fdroid.fdroid/db/fdroid_db'
-    FDROID_DB = os.path.basename(FDROID_BKP_DB)
+    FDROID_DB = Path(os.path.basename(FDROID_BKP_DB))
     
-    # phone = AndroidPhone.try_connect()
-    # if not phone:
-    #     print("No phone connected.")
-    #     return 1
-    
-    # phone.get_package_backup('org.fdroid.fdroid')
-    with open('fdroid.backup', 'rb') as fin:
-        db_data = AndroidPhone.get_file_from_backup(chunked_stream(fin), FDROID_BKP_DB)
+    phone: AndroidPhone
+
+    def __enter__(self):
+        if not LISTER_JAR.is_file():
+            print("Missing lister jar.")
+            return None
         
-        with open(FDROID_DB, 'wb') as fout:
-            for chunk in chunked_stream(db_data):
-                fout.write(chunk)
+        print("Connecting to phone...")
+        self.phone = AndroidPhone().__enter__()
+        if not self.phone:
+            print("No phone connected.")
+            return None
+        return self
     
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.phone:
+            self.phone.__exit__(exc_type, exc_val, exc_tb)
+
+
+    async def run(self):
+        if not self.FDROID_DB.exists():
+            with self.phone.get_package_backup('org.fdroid.fdroid') as bkp, \
+                open(self.FDROID_DB, 'wb') as fout:
+                
+                db_data = AndroidPhone.get_file_from_backup(bkp, self.FDROID_BKP_DB)
+                for chunk in chunked_stream(db_data):
+                    fout.write(chunk)
+        
+        print()
+        print("Getting packages...")
+        
+        # with self.phone.get_dumpsys_packages() as dump:
+        #     dumpsys = TextIterStream(dumpsys)
+        #     apps = list(InstalledApp.fetch_foreign_apps(dumpsys))
+        
+        apps = []
+        for japp in self.phone.get_package_list():
+            apps.append(InstalledApp.from_lister(japp))
+        
+        InstalledApp.print_apps_table(apps)
+        return
     
-    repos = list(FDroidRepo.read_from_backup(FDROID_DB))
+        print()
+        print("Repositories:")
+        repos = list(FDroidRepo.read_from_backup(self.FDROID_DB, self.CACHE))
+        for r in repos:
+            print(f"  {r.name:<40s} {r.address}")
     
-    print("Repositories:")
-    for r in repos:
-        print(f"  {r.name:<40s} {r.address}")
+        print()
+        print("Updating repos...")
+        tasks = [r.update_repo() for r in repos]
+        await asyncio.gather(*tasks)
     
-    return
+        # print()
+        # print("Checking...")
+        # tasks = [r.update_repo() for r in repos]
+        # await asyncio.gather(*tasks)
+
     
-    # print()
-    # print("Updating repos...")
-    # tasks = [r.update_repo() for r in repos]
-    # await asyncio.gather(*tasks)
-    
-    print()
-    print("Getting packages...")
-    # phone = get_adb_device()
-    # if not phone:
-    #     return 1
-    # dumpsys = chunk_read_lines(phone.StreamingShell('dumpsys package packages'))
-    with open('dumpsys.txt', 'r') as dumpsys:
-        dumpsys = TextIterStream(dumpsys)
-        apps = list(AndroidApp.fetch_foreign_apps(dumpsys))
-        AndroidApp.print_apps_table(apps)
+async def main(arg0, *args) -> int:
+    with Updater() as prog:
+        if not prog:
+            return 1
+        return await prog.run()
 
 
 if __name__ == '__main__':
