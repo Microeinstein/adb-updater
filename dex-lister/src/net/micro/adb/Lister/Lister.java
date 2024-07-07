@@ -47,18 +47,22 @@ public final class Lister {
         json.name("system").value((app.flags & sys) == sys);
         json.name("label").value(pm.getApplicationLabel(app).toString());
         
-        // get version code
+        // get version
         Long vcode = null;
+        String vname = null;
         if (is_inst) {
             try {
                 final PackageInfo pInfo = pm.getPackageInfo(app.packageName, PackageManager.GET_META_DATA);
-                if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                     vcode = pInfo.getLongVersionCode();
-                else
+                } else {
                     vcode = (long)pInfo.versionCode;
+                }
+                vname = pInfo.versionName;
             } catch (Exception e) {}
         }
         json.name("vcode").value(vcode);
+        json.name("vname").value(vname);
         
         // get installer package
         String instInfo = null;

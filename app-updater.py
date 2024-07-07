@@ -9,8 +9,12 @@ from pathlib import Path
 from urllib.parse import urljoin
 from typing import List, Dict, Optional, Iterable, AnyStr, Any
 
+import tomlkit
+
 from adb import adb_commands, sign_cryptography
 from adb import usb_exceptions as usb_ex
+
+# NOTE: adb_commands.AdbCommands.BytesStreamingShell requires a byte-format command
 
 
 SELFDIR = Path(os.path.dirname(os.path.realpath(__file__)))
@@ -19,6 +23,19 @@ LISTER_MAIN = 'net.micro.adb.Lister.Lister'
 
 
 ######## UTILS ########
+
+def title(*values, **kw):
+    values = (kw.get('sep', ' ')).join(values)
+    kw['sep'] = ''
+    kw['file'] = sys.stderr
+    print('\n\x1b[1m', values, '\x1b[0m', **kw)
+
+def error(*values, **kw):
+    values = (kw.get('sep', ' ')).join(values)
+    kw['sep'] = ''
+    kw['file'] = sys.stderr
+    print('\x1b[30m', values, '\x1b[0m', **kw)
+
 
 RGX_URL = re.compile(r"^[^:/]+://([^?#]+)([?#].*)?$")
 
@@ -209,6 +226,63 @@ class PropMessage:
         setattr(obj, self.priv, value)
 
 
+# @dataclass
+# class ConfigProp:
+#     def __set_name__(self, owner, name):
+#         self.key = name
+#
+#     def __get__(self, facade, objtype=None):
+#         return getattr(getattr(facade, 'config'), self.key)
+#
+#     def __set__(self, facade, value):
+#         setattr(getattr(facade, 'config'), self.key, value)
+
+
+class TOMLConfig:
+    def __post_init__(self):
+        ...
+    
+    def __getattr__(self, name):
+        if not name.startswith('__'):
+            return self.__toml__[name]
+        return super().__getattribute__(name)
+    
+    def __setattr__(self, name, value):
+        if not name.startswith('__'):
+            self.__toml__[name] = value
+        super().__setattr__(name, value)
+    
+    @classmethod
+    def load(cls, fin) -> "TOMLConfig":
+        data = tomlkit.load(fin)
+        # update() will convert TOMLDocument to dict, unwanted
+        for k, v in cls.__dict__.items():
+            if not k.startswith('__'):
+                data.setdefault(k, v)
+        
+        ret = TOMLConfig()
+        ret.__toml__ = data  # TOMLDocument
+        ret.__post_init__()
+        return ret
+    
+    def dump(self, fout):
+        tomlkit.dump(self.__toml__, fout)
+
+
+class ConfigType(ABC):
+    SERIALIZE: List[str]
+    
+    @classmethod
+    def load(cls, data: Dict[str, Any], **extra):
+        for k in cls.SERIALIZE:
+            if k not in data:
+                raise RuntimeError(f"Missing attribute {k!r}.")
+        return cls(**data, **extra)
+    
+    def save(self) -> Dict[str, Any]:
+        return {k: getattr(self, k) for k in self.SERIALIZE}
+
+
 class AndroidPhone:
     TMP = '/data/local/tmp'
     
@@ -250,15 +324,19 @@ class AndroidPhone:
         
         self.device.Push(str(LISTER_JAR), dest, timeout_ms=30000)
         
-        text_iter = self.device.StreamingShell(f"CLASSPATH={dest!r} app_process / {LISTER_MAIN!r}")
+        raw_iter = self.device.BytesStreamingShell(f"""
+            export CLASSPATH={dest!r};
+            app_process / {LISTER_MAIN!r} | gzip;
+        """.encode())
         
-        txt = TextIterStream(text_iter)
-        js = json_stream.load(txt)
+        raw = RawIterStream(raw_iter)
+        gz = GzipDecompStream(raw)
+        js = json_stream.load(gz)
         for japp in js:
             yield json_stream.to_standard_types(japp)
         
     def get_package_backup(self, package: str) -> io.RawIOBase:
-        bytes_iter = self.device.BytesStreamingShell(f"bu backup -keyvalue {package}")
+        bytes_iter = self.device.BytesStreamingShell(f"bu backup -keyvalue {package}".encode())
         return RawIterStream(bytes_iter)
     
     @staticmethod
@@ -278,9 +356,27 @@ class AndroidPhone:
 
 @dataclass
 class AndroidApp:
+    PKG_INSTALLER = 'com.google.android.packageinstaller'
+    FDROID_APP    = 'org.fdroid.fdroid'
+    FOXYDROID_APP = 'nya.kitsunyan.foxydroid'
+    FFUPDATER_APP = 'de.marmaro.krt.ffupdater'
+    ISLAND_SBOX   = 'com.oasisfeng.island.fdroid'
+    PLAY_STORE    = 'com.android.vending'
+    AMAZON_STORE  = 'com.amazon.venezia'
+    HUAWEI_STORE  = 'com.huawei.appmarket'
+    AURORA_STORE  = 'com.aurora.store'
+    
+    OPEN_STORES   = [
+        PKG_INSTALLER,
+        FDROID_APP,
+        FOXYDROID_APP,
+        FFUPDATER_APP
+    ]
+    
     package: str
-    version_code: str
     label: str
+    version_code: str
+    version_name: str
     
 
 @dataclass
@@ -290,6 +386,7 @@ class InstalledApp(AndroidApp):
     RGX_VER  = re.compile(r"([^ ]+).*$", re.I)
     
     system: bool
+    removed: bool
     installer: Optional[str] = None
     
     @classmethod
@@ -329,10 +426,11 @@ class InstalledApp(AndroidApp):
     def from_lister(cls, japp: Dict) -> "InstalledApp":
         return InstalledApp(
             package      = japp['pkg'],
-            version_code = japp['vcode'],
             label        = japp['label'],
+            version_code = japp['vcode'],
+            version_name = japp['vname'],
             system       = japp['system'],
-            # removed      = japp['removed'],
+            removed      = japp['removed'],
             installer    = japp['installer'],
         )
         
@@ -344,16 +442,52 @@ class InstalledApp(AndroidApp):
         )
         for a in apps:
             a: InstalledApp
-            print(f"  {a.label:<50} {a.version_code or '--':<12} {a.system:<5} {a.installer}")
+            print(f"  {a.label:<50} {a.version_name or '--':<12} {a.system:<5} {a.installer}")
 
 
 @dataclass
 class FDroidApp(AndroidApp):
-    ...
+    repo: "FDroidRepo"
+    url: str
+    
+    @classmethod
+    def from_index_v2(cls, repo: "FDroidRepo", pkg: str, json_like: Dict) -> "FDroidApp":
+        package = json_like['packages'][pkg]
+        meta = package['metadata']
+        last_ver = list(package['versions'].values())[0]
+        
+        return FDroidApp(
+            package      = pkg,
+            label        = meta['name']['en-US'],
+            repo         = repo,
+            version_code = last_ver['manifest']['versionCode'],
+            version_name = last_ver['manifest']['versionName'],
+            url          = last_ver['file']['name'],
+        )
+    
+    @classmethod
+    def from_index_v1(cls, repo: "FDroidRepo", pkg: str, json_like: Dict) -> "FDroidApp":
+        apps = json_like['apps']
+        if not isinstance(apps, dict):
+            # convert this shit, only the first time
+            apps = json_like['apps'] = {app['packageName']: v for app in apps}
+            
+        app = apps[pkg]
+        last_ver = json_like['packages'][pkg][0]
+        
+        return FDroidApp(
+            package      = pkg,
+            label        = app['localized']['en-US']['name'],
+            repo         = repo,
+            version_code = last_ver['versionCode'],
+            version_name = last_ver['versionName'],
+            url          = '/' + last_ver['apkName'],
+        )
 
 
 @dataclass
-class FDroidRepo:
+class FDroidRepo(ConfigType):
+    SERIALIZE = ['name', 'address']
     JSON_INDEX_V1 = 'index-v1.json'
     JSON_ENTRY = 'entry.json'
 
@@ -361,7 +495,7 @@ class FDroidRepo:
     name: str
     address: str
     cache_path: Path = field(init=False)
-    apps: Dict[str, AndroidApp]
+    apps: Dict[str, AndroidApp] = field(init=False)
 
     @classmethod
     def read_from_backup(cls, path, base_dir) -> "FDroidRepo":
@@ -402,80 +536,157 @@ class FDroidRepo:
                 )
                 return
     
-    def load_repo_apps(self):
-        ...
+    def load_repo_apps(self, pkgs: List[str]):
+        if not self.cache_path:
+            return
+        
+        if self.cache_path.match(self.JSON_INDEX_V1):
+            with open(self.cache_path, 'r') as fin_apps, \
+                 open(self.cache_path, 'r') as fin_pkgs:
+                
+                json_like = dict(
+                    apps     = json_stream.load(fin_apps)['apps'].persistent(),
+                    packages = json_stream.load(fin_pkgs)['packages'].persistent(),
+                )
+                
+                for p in pkgs:
+                    yield FDroidApp.from_index_v1(self, p, json_like)
+        
+        else:  # v2
+            with open(self.cache_path, 'r') as fin_pkgs:
+                
+                json_like = dict(
+                    packages = json_stream.load(fin_pkgs)['packages'].persistent(),
+                )
+                
+                for p in pkgs:
+                    yield FDroidApp.from_index_v2(self, p, json_like)
 
 
-class Updater():
+class UpdaterConfig(TOMLConfig):
+    repos: List[FDroidRepo]
+
+
+class Updater:
     CACHE = Path('cache')
-    FDROID_BKP_DB = 'apps/org.fdroid.fdroid/db/fdroid_db'
-    FDROID_DB = Path(os.path.basename(FDROID_BKP_DB))
+    CONFIG = Path('config.toml')
+    FDROID_BKP_DB = f'apps/{AndroidApp.FDROID_APP}/db/fdroid_db'
+    FDROID_DB = CACHE / Path(os.path.basename(FDROID_BKP_DB))
     
     phone: AndroidPhone
-
-    def __enter__(self):
-        if not LISTER_JAR.is_file():
-            print("Missing lister jar.")
-            return None
-        
-        print("Connecting to phone...")
-        self.phone = AndroidPhone().__enter__()
-        if not self.phone:
-            print("No phone connected.")
-            return None
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.phone:
-            self.phone.__exit__(exc_type, exc_val, exc_tb)
+    repos: List[FDroidRepo]
+    apps: Dict[str, InstalledApp]
 
 
-    async def run(self):
-        if not self.FDROID_DB.exists():
-            with self.phone.get_package_backup('org.fdroid.fdroid') as bkp, \
-                open(self.FDROID_DB, 'wb') as fout:
+    def repos_from_backup(self):
+        if not self.FDROID_DB.is_file():
+            print("Getting FDroid database from phone... (requires manual confirm)")
+            
+            with self.phone.get_package_backup(AndroidApp.FDROID_APP) as bkp, \
+                 open(self.FDROID_DB, 'wb') as fout:
                 
                 db_data = AndroidPhone.get_file_from_backup(bkp, self.FDROID_BKP_DB)
                 for chunk in chunked_stream(db_data):
                     fout.write(chunk)
+    
+        return FDroidRepo.read_from_backup(self.FDROID_DB, self.CACHE)
+
+
+    def load_config(self, fconf: io.IOBase = None):
+        if not fconf:
+            with open(self.CONFIG, 'a+t') as fconf:
+                fconf.seek(0)
+                return self.load_config(fconf)
         
-        print()
-        print("Getting packages...")
+        title("Loading config...")
+        
+        config = UpdaterConfig.load(fconf)
+        
+        repos = config.repos
+        if not repos:
+            repos = self.repos_from_backup()
+        else:
+            repos = (FDroidRepo.load(r, base_dir=self.CACHE) for r in repos)
+        self.repos = list(repos)
+        
+        # prepare for save
+        config.repos = list(r.save() for r in self.repos)
+        
+        # save changes
+        fconf.seek(0)
+        config.dump(fconf)
+        fconf.truncate()
+        
+        title("Repositories:")
+        for r in self.repos:
+            print(f"  {r.name:<40s} {r.address}")
+    
+    
+    def load_apps(self):
+        title("Getting packages...")
+        self.apps = {}
         
         # with self.phone.get_dumpsys_packages() as dump:
         #     dumpsys = TextIterStream(dumpsys)
-        #     apps = list(InstalledApp.fetch_foreign_apps(dumpsys))
+        #     for app in InstalledApp._fetch_foreign_apps(dumpsys):
+        #         self.apps[app.package] = app
         
-        apps = []
+        n_total = 0
+        n_system = 0
+        n_removed = 0
+        n_foreign = 0
+        
+        print('\x1b7Awaiting response from device...')
         for japp in self.phone.get_package_list():
-            apps.append(InstalledApp.from_lister(japp))
+            app = InstalledApp.from_lister(japp)
+            n_total += 1
+            n_system += int(app.system)
+            n_removed += int(app.removed)
+            if not app.system and app.installer in AndroidApp.OPEN_STORES:
+                n_foreign += 1
+                self.apps[app.package] = app
+            
+            print(f'\x1b8\x1b[0J', end='')
+            for k, v in (
+                ('total', n_total),
+                ('system', n_system),
+                ('removed', n_removed),
+                ('closed', n_total - n_system - n_foreign),
+                ('foreign', n_foreign),
+            ):
+                print(f"{k:<8} : {v}")
         
-        InstalledApp.print_apps_table(apps)
-        return
+        InstalledApp.print_apps_table(self.apps.values())
     
-        print()
-        print("Repositories:")
-        repos = list(FDroidRepo.read_from_backup(self.FDROID_DB, self.CACHE))
-        for r in repos:
-            print(f"  {r.name:<40s} {r.address}")
     
-        print()
-        print("Updating repos...")
+    async def update_repos(self):
+        title("Updating repos...")
         tasks = [r.update_repo() for r in repos]
         await asyncio.gather(*tasks)
     
-        # print()
-        # print("Checking...")
-        # tasks = [r.update_repo() for r in repos]
-        # await asyncio.gather(*tasks)
-
     
-async def main(arg0, *args) -> int:
-    with Updater() as prog:
-        if not prog:
-            return 1
-        return await prog.run()
+    async def main(self, arg0, *args, _loaded = None):
+        if not _loaded:
+            os.makedirs(self.CACHE, exist_ok=True)
+            
+            if not LISTER_JAR.is_file():
+                error("Missing lister jar.")
+                return 1
+            
+            title("Connecting to phone...")
+            with AndroidPhone() as self.phone:
+                return await self.main(arg0, *args, _loaded=True)
+        
+        self.load_config()
+        self.load_apps()
+        return
+        await self.update_repos()
+    
+        title("Checking...")
+        tasks = [r.update_repo() for r in repos]
+        await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
-    sys.exit(asyncio.run(main(*sys.argv)) or 0)
+    err = asyncio.run(Updater().main(*sys.argv)) or 0
+    sys.exit(err)
