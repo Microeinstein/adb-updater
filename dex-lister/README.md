@@ -9,6 +9,8 @@
 
 - https://raccoon.onyxbits.de/blog/run-java-app-android/
 
+- https://elinux.org/Android_Zygote_Startup
+
 #### (unused)
 
 - https://raccoon.onyxbits.de/blog/programmatically-talking-to-the-android-system-adb-shell/
