@@ -14,7 +14,10 @@ import com.google.gson.stream.JsonWriter;
 
 @SuppressWarnings("deprecation")
 public final class Lister {
+    public static final String SELF;
+    
     static {
+        SELF = System.getProperty("java.class.path").split(File.pathSeparator)[0];
         // Workarounds.init();
         // System.out.println("Hello from Lister");
         
@@ -24,14 +27,17 @@ public final class Lister {
         // System.loadLibrary("android");
         // System.loadLibrary("android_runtime");
         // System.loadLibrary("binder");
-        
-        // NOTE: MUST run the app with  app_process  command
-        // ~~(commented because loop is prepared in Workarounds.java)~~
-        Looper.prepareMainLooper();
     }
     
     private Lister() {
         // not instantiable
+    }
+    
+    public static void delete_self() throws Exception {
+        if (SELF.startsWith("/data/local/tmp") && SELF.endsWith(".jar")) {
+            // keep phone clean
+            new File(SELF).delete();
+        }
     }
     
     public static void app2json(PackageManager pm, ApplicationInfo app, JsonWriter json) throws IOException {
@@ -77,11 +83,14 @@ public final class Lister {
         json.endObject();
     }
     
-    public static void main(String[] args) throws Exception {
-        // System.out.println("Hello from main");
+    public static void print_apps_json() throws Exception {
+        // NOTE: MUST run the app with  app_process  command
+        // (comment if you use Workarounds.java)
+        Looper.prepareMainLooper();
         
         // Context ctx = Workarounds.getSystemContext();
-        Context ctx = ActivityThread.systemMain().getSystemContext();
+        ActivityThread thr = ActivityThread.systemMain();
+        Context ctx = thr.getSystemContext();
         PackageManager pm = ctx.getPackageManager();
         
         // get packages
@@ -110,5 +119,32 @@ public final class Lister {
         // The Android SDK might start some non-daemon threads internally, preventing the program to exit.
         // So force the process to exit explicitly.
         System.exit(0);
+    }
+    
+    public static void experiment(String[] args) throws Exception {
+        Looper.prepare();
+        Handler h = new Handler();
+        Looper.loop();
+        
+        // Context ctx = Workarounds.getSystemContext();
+        ActivityThread thr = ActivityThread.systemMain();
+        Context ctx = thr.getSystemContext();
+        PackageManager pm = ctx.getPackageManager();
+        
+        ApplicationInfo info = pm.getApplicationInfo("org.fdroid.fdroid", PackageManager.GET_SHARED_LIBRARY_FILES);
+        thr.installSystemApplicationInfo(info, Lister.class.getClassLoader());
+        System.setProperty("java.class.path", "/data/app/org.fdroid.fdroid-MPnyVgMbHQ_n0hKMy_AF4Q==/base.apk");
+        Thread thread = new Thread(new Runnable() {
+            public void run() {
+                ActivityThread.main(args);
+            }
+        });
+        thread.start();
+    }
+    
+    public static void main(String[] args) throws Exception {
+        delete_self();
+        // System.out.println("Hello from main");
+        print_apps_json();
     }
 }

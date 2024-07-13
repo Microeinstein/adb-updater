@@ -34,6 +34,7 @@ SDK_TOOLS="$SDK/platforms-tools"
 LIB_ANDROID="$SDK_PLAT/android.jar"
 LIB_LAMBDA="$SDK_BUILD/core-lambda-stubs.jar"
 LIB_FRAMEWORK="$DIR_LIB/framework.jar"
+LIB_CORE_OJ="$DIR_LIB/core-oj.jar"
 
 
 cat <<EOF
@@ -94,17 +95,20 @@ reset() {
 }
 
 
-get_framework() (
-    if [[ -f "$LIB_FRAMEWORK" ]]; then
+get_phone_lib() (
+    local lib="${1:?Missing library remote path.}"
+    local nam
+    nam="$(basename "$lib")"
+    cd "$DIR_LIB"
+    if [[ -f "$nam" ]]; then
         return
     fi
-    title "Getting framework from phone..."
+    title "Getting $nam from phone..."
     check_bin_deps  adb dex2jar
-    cd "$DIR_LIB"
     
-    adb pull '/system/framework/framework.jar' .
-    dex2jar "$LIB_FRAMEWORK"
-    mv "$(basename -s .jar "$LIB_FRAMEWORK")-dex2jar.jar" "$LIB_FRAMEWORK"
+    adb pull "$lib" .
+    dex2jar "$nam"
+    mv "$(basename -s .jar "$nam")-dex2jar.jar" "$nam"
 )
 
 
@@ -134,6 +138,7 @@ find_sources() {
         -type f
         -not -name '.*'
         -and -not  -iname "$(basename "$LIB_FRAMEWORK")"
+        -and -not  -iname "$(basename "$LIB_CORE_OJ")"
         -and  -iname
     )
     
@@ -178,6 +183,7 @@ compile_java() (
         "${libs[@]}"
         "$DIR_GEN"
         "$LIB_LAMBDA"
+        "$LIB_CORE_OJ"
         "$LIB_FRAMEWORK"
     )
     
@@ -274,7 +280,10 @@ main() {
     local libs=()
     
     reset
-    get_framework
+    # BOOTCLASSPATH
+    # SYSTEMSERVERCLASSPATH
+    get_phone_lib '/system/framework/framework.jar'
+    get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
     generate_buildconfig
     find_sources
     compile_aidl

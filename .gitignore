@@ -1,0 +1,10 @@
+.*
+*.code-workspace
+config.toml
+
+notes/
+trash/
+venv/
+cache/
+build/
+lib/

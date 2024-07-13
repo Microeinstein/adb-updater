@@ -79,12 +79,20 @@ async def try_get_url(session, dir, url, new_ts: int = None):
     fpath = dir / url2path(url)
     print('  ', fpath, sep='')
     
-    if new_ts and fpath.exists() and fpath.stat().st_mtime <= new_ts:
+    old_ts = fpath.stat().st_mtime if fpath.exists() else 0
+    if new_ts and old_ts >= new_ts:
         return fpath
     
-    async with session.get(url) as response:
-        if not response.ok:
+    headers = {
+        'If-Modified-Since': old_ts,
+        'If-None-Match': ...,
+    }
+    async with session.get(url, headers=headers) as response:
+        if not response.ok:  # < 400
             return None
+        
+        if response.status == 304:
+            return fpath
         
         # if "content-disposition" in response.headers:
         #     header = response.headers["content-disposition"]
@@ -689,7 +697,7 @@ class FDroidRepo(ConfigType):
 
 
 class UpdaterConfig(TOMLConfig):
-    hmm: str = "seriously"
+    ignore_pkg: List[str] = ['ignore.during.updates']
     repos: List[FDroidRepo]
 
 
@@ -720,15 +728,11 @@ class Updater:
         return FDroidRepo.read_from_backup(self.FDROID_DB, self.CACHE)
 
 
-    def load_config(self, fconf: io.IOBase = None):
-        if not fconf:
-            with open(self.CONFIG, 'a+t') as fconf:
-                fconf.seek(0)
-                return self.load_config(fconf)
-        
+    def load_config(self):
         title("Loading config...")
         
-        config = UpdaterConfig.load(fconf)
+        with open(self.CONFIG, 'rt') as fconf:
+            config = UpdaterConfig.load(fconf)
         
         repos = config.repos
         if not repos:
@@ -741,9 +745,8 @@ class Updater:
         config.repos = list(r.save() for r in self.repos)
         
         # save changes
-        # fconf.seek(0)
-        # config.dump(fconf)
-        # fconf.truncate()
+        with open(self.CONFIG, 'wt') as fconf:
+            config.dump(fconf)
         
         title("Repositories:")
         for r in self.repos:
@@ -861,6 +864,7 @@ class Updater:
             return 1
         
         self.load_config()
+        return
         await self.update_repos()
         self.load_apps()
         await self.check_updates()
