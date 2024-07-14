@@ -1,0 +1,19 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "App updater",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app_updater",
+            "cwd": "${workspaceFolder}",
+            "autoReload": {
+                "enable": true
+            },
+            "env": {
+                "PYTHONPATH": "./src"
+            },
+            "justMyCode": true
+        }
+    ]
+}

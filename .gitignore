@@ -4,6 +4,7 @@ config.toml
 
 notes/
 trash/
+__pycache__/
 venv/
 cache/
 build/
