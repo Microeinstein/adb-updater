@@ -2,18 +2,45 @@
 import io, zlib
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import List, Iterable
+from collections.abc import Iterator, Generator
+from typing import IO, TypeVar, Generic, Any
 
-__all__ = 'CHUNKSIZE  IterStream  RawIterStream  TextIterStream  ZlibDecompStream  GzipDecompStream  chunked_stream  flush_stream'.split()
 
 CHUNKSIZE = 1024 * 4 * 4
 
 
+def open_or_create(file, mode: str, *a, **kw) -> io.FileIO | IO[Any]:
+    try:
+        return open(file, mode, *a, **kw)
+    except OSError:
+        mode = 'a+' + mode.translate(str.maketrans('', '', 'awr+'))
+        return open(file, mode, *a, **kw)
+
+
+def chunked_stream(stream: io.RawIOBase, chunksize=CHUNKSIZE) -> Generator[bytes]:
+    while True:
+        c = stream.read(chunksize)
+        if not c:
+            break
+        yield c
+
+
+def flush_stream(stream: io.IOBase | IO[Any]):
+    if isinstance(stream, io.RawIOBase):
+        while stream.read(CHUNKSIZE):
+            pass
+    else:
+        while stream.readline():
+            pass
+
+
+Tbuff = TypeVar('Tbuff', io.StringIO, io.BytesIO)
+Tstr = TypeVar('Tstr', str, bytes)
 
 @dataclass
-class IterStream(ABC):
-    iter: Iterable
-    leftover: io.IOBase = field(init=False)
+class IterStream(ABC, Generic[Tbuff, Tstr], io.IOBase):
+    iter: Iterator[Tstr]
+    leftover: Tbuff = field(init=False)
     
     def __post_init__(self):
         self.iter = iter(self.iter)
@@ -33,13 +60,17 @@ class IterStream(ABC):
         flush_stream(self)
         super().close()
     
-    def read(self, size=-1, /) -> io.IOBase:
-        buffer = self.leftover
+    def _read(self, size: int|None = -1, /) -> Tbuff:
+        size = -1 if size is None else size
+        buffer: ... = self.leftover
+        if size == 0:
+            return buffer
+        
         cur = buffer.seek(0, io.SEEK_END)
         
         try:
             while (size < 0 or cur < size) and not self._read_limiter(buffer):
-                data = next(self.iter)
+                data: Tstr = next(self.iter)
                 cur += buffer.write(data)
         except StopIteration:
             pass
@@ -57,7 +88,7 @@ class IterStream(ABC):
         return buffer
 
 
-class TextIterStream(IterStream, io.TextIOBase):
+class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
     leftover: io.StringIO
     _line: str
     
@@ -67,7 +98,7 @@ class TextIterStream(IterStream, io.TextIOBase):
     def _read_limiter(self, buffer):
         return buffer.tell() > 0
     
-    def readlines(self, hint=-1, /) -> List[str]:
+    def readlines(self, hint=-1, /) -> list[str]:  # type: ignore[override]
         lines = []
         while hint != 0:
             line = self.readline()
@@ -78,15 +109,15 @@ class TextIterStream(IterStream, io.TextIOBase):
             lines.append(line)
         return lines
     
-    def readline(self, size=-1, /) -> str:
+    def readline(self, size=-1, /) -> str:  # type: ignore[override]
         super().read(size)
         return self._line
     
     def read(self, size=-1, /) -> str:
-        return super().read(size).getvalue()
+        return super()._read(size).getvalue()
 
 
-class RawIterStream(IterStream, io.RawIOBase):
+class RawIterStream(IterStream[io.BytesIO, bytes], io.RawIOBase):
     leftover: io.BytesIO
     
     def _seek_to_cut(self, buffer, size):
@@ -97,44 +128,28 @@ class RawIterStream(IterStream, io.RawIOBase):
         return self.read()
     
     def read(self, size=-1, /) -> bytes:
-        return super().read(size).getvalue()
+        return super()._read(size).getvalue()
 
 
-def ZlibDecompStream(fileobj: io.RawIOBase):
+def ZlibDecompStream(fileobj: io.RawIOBase | IO[bytes]):
     def chunked():
         dec = zlib.decompressobj(wbits=15)
         while True:
-            raw = dec.decompress(fileobj.read(CHUNKSIZE))
+            raw: bytes = fileobj.read(CHUNKSIZE)
+            raw = dec.decompress(raw)
             if not raw:
                 break
             yield raw
     return RawIterStream(chunked())
 
 
-def GzipDecompStream(fileobj: io.RawIOBase):
+def GzipDecompStream(fileobj: io.RawIOBase | IO[bytes]):
     def chunked():
         dec = zlib.decompressobj(wbits=47)
         while True:
-            raw = dec.decompress(fileobj.read(CHUNKSIZE))
+            raw: bytes = fileobj.read(CHUNKSIZE)
+            raw = dec.decompress(raw)
             if not raw:
                 break
             yield raw
     return RawIterStream(chunked())
-
-
-def chunked_stream(stream: io.RawIOBase, chunksize=CHUNKSIZE) -> bytes:
-    while True:
-        c = stream.read(chunksize)
-        if not c:
-            break
-        yield c
-
-
-def flush_stream(stream: io.IOBase):
-    if isinstance(stream, io.RawIOBase):
-        stream: io.RawIOBase
-        while stream.read(CHUNKSIZE):
-            pass
-    else:
-        while stream.readline():
-            pass

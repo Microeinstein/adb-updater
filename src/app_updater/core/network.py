@@ -1,12 +1,13 @@
 
 import os, re
+import datetime as dt
 from pathlib import Path
 from urllib.parse import urljoin
-from typing import AnyStr
+from email.utils import format_datetime
 
 from aiohttp import ClientSession
 
-__all__ = 'url2path  rel_urljoin  try_get_url'.split()
+from .io import CHUNKSIZE
 
 
 RGX_URL = re.compile(r"^[^:/]+://([^?#]+)([?#].*)?$")
@@ -18,28 +19,38 @@ def url2path(url: str) -> Path:
     return Path(m[1])
 
 
-def rel_urljoin(base: AnyStr, url: AnyStr, **kw) -> AnyStr:
+def rel_urljoin(base: str, url: str, **kw) -> str:
     return urljoin(base + '/', './' + url, **kw)
 
 
-async def try_get_url(session: ClientSession, dir, url, new_ts: int = None):
-    fpath = dir / url2path(url)
-    print('  ', fpath, sep='')
+async def try_get_url(
+    session: ClientSession,
+    url: str,
+    dest: Path,
+    etag: str|None = None,
+    server_ts: int|None = None
+) -> tuple[Path|None, str|None]:
+    print('  ', url, sep='')
     
-    old_ts = fpath.stat().st_mtime if fpath.exists() else 0
-    if new_ts and old_ts >= new_ts:
-        return fpath
+    cur_ts = dest.stat().st_mtime if dest.exists() else 0
+    if server_ts and cur_ts >= server_ts:
+        return dest, etag
     
+    since = dt.datetime.fromtimestamp(cur_ts, dt.timezone.utc)
+    since = format_datetime(since, usegmt=True)
     headers = {
-        'If-Modified-Since': old_ts,
-        'If-None-Match': ...,
+        'If-Modified-Since': since,
+        'If-None-Match': etag,
     }
+    headers = {k: v for k, v in headers.items() if v is not None}  # trim none values
+    
     async with session.get(url, headers=headers) as response:
+        etag = response.headers.get('etag')
         if not response.ok:  # < 400
-            return None
+            return None, etag
         
         if response.status == 304:
-            return fpath
+            return dest, etag
         
         # if "content-disposition" in response.headers:
         #     header = response.headers["content-disposition"]
@@ -47,11 +58,11 @@ async def try_get_url(session: ClientSession, dir, url, new_ts: int = None):
         # else:
         #     filename = res.split("/")[-1]
         
-        os.makedirs(fpath.parent, exist_ok=True)
-        with open(fpath, mode="wb") as file:
+        os.makedirs(dest.parent, exist_ok=True)
+        with open(dest, mode="wb") as file:
             while True:
-                chunk = await response.content.read()
+                chunk = await response.content.read(CHUNKSIZE)
                 if not chunk:
                     break
                 file.write(chunk)
-        return fpath
+        return dest, etag

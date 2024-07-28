@@ -3,8 +3,6 @@ import sys
 
 import readchar as rc
 
-__all__ = 'middle_ellipsis  title  error  ask_yes_no'.split()
-
 
 def middle_ellipsis(txt: str, maxwidth: int):
     l = len(txt)
@@ -16,21 +14,21 @@ def middle_ellipsis(txt: str, maxwidth: int):
     return f"{txt[:l1]}…{txt[l-l2:]}"
 
 
-def title(*values, **kw):
-    values = (kw.get('sep', ' ')).join(values)
+def title(*values: object, **kw):
+    text = (kw.get('sep', ' ')).join(values)
     kw['sep'] = ''
     kw['file'] = sys.stderr
-    print('\n\x1b[1m', values, '\x1b[0m', **kw)
+    print('\n\x1b[1m', text, '\x1b[0m', **kw)
 
 
-def error(*values, **kw):
+def error(*values: object, **kw):
     values = (kw.get('sep', ' ')).join(values)
     kw['sep'] = ''
     kw['file'] = sys.stderr
     print('\x1b[30m', values, '\x1b[0m', **kw)
 
 
-def ask_yes_no(prompt, default=False):
+def ask_yes_no(prompt: str, default=False):
     print(prompt, ' ', '[Y/n]' if default else '[y/N]', ': ', sep='', end='')
     try:
         while True:

@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 
-import sys, os, asyncio
+import os, asyncio
 
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import Any
 
 import tableprint as tp
 
 from .core.context import ContextProp, a_autoexit
+from .core.io import chunked_stream
 from .core.config import TOMLConfig
 from .core.ui import *
-from .android_phone import AndroidPhone
-from .apps import *
-from .fdroid import FDroidRepo
+from .android.phone import *
+from .android.apps import *
+from .android.fdroid import *
 from .platform import Platform
 
 
 class UpdaterConfig(TOMLConfig):
-    ignore_pkg: List[str] = ['ignore.during.updates']
-    repos: List[FDroidRepo]
+    ignore_pkg: list[str] = ['ignore.during.updates']
+    repos: list[dict[str, Any]]
 
 
 class Updater:
@@ -26,10 +27,10 @@ class Updater:
     FDROID_DB = Platform.CACHE / Path(os.path.basename(FDROID_BKP_DB))
     
     phone: AndroidPhone = ContextProp()
-    repos: List[FDroidRepo]
-    apps: Dict[str, InstalledApp]  # foreign
-    updates: Dict[str, Tuple[InstalledApp, FDroidApp]]
-    missing: Dict[str, InstalledApp]
+    repos: list[FDroidRepo]
+    apps: dict[str, InstalledApp]  # foreign
+    updates: dict[str, tuple[InstalledApp, FDroidApp]]
+    missing: dict[str, InstalledApp]
 
 
     def repos_from_backup(self):
@@ -39,31 +40,31 @@ class Updater:
             with self.phone.get_package_backup(AndroidApp.FDROID_APP) as bkp, \
                  open(self.FDROID_DB, 'wb') as fout:
                 
-                db_data = AndroidPhone.get_file_from_backup(bkp, self.FDROID_BKP_DB)
+                db_data: io.RawIOBase = AndroidPhone.get_file_from_backup(bkp, self.FDROID_BKP_DB)
                 for chunk in chunked_stream(db_data):
                     fout.write(chunk)
     
-        return FDroidRepo.read_from_backup(self.FDROID_DB, self.CACHE)
+        return FDroidRepo.read_from_backup(self.FDROID_DB)
 
 
     def load_config(self):
         title("Loading config...")
         
-        with open(Platform.CONFIG, 'rt') as fconf:
+        with open(Platform.CONFIG, 'r+t') as fconf:
             config = UpdaterConfig.load(fconf)
         
-        repos = config.repos
-        if not repos:
-            repos = self.repos_from_backup()
-        else:
-            repos = (FDroidRepo.load(r, base_dir=Platform.CACHE) for r in repos)
-        self.repos = list(repos)
-        
-        # prepare for save
-        config.repos = list(r.save() for r in self.repos)
-        
-        # save changes
-        with open(Platform.CONFIG, 'wt') as fconf:
+            repos = config.repos
+            if not repos:
+                repos = self.repos_from_backup()
+            else:
+                repos = (FDroidRepo.load(r) for r in repos)
+            self.repos = list(repos)
+            
+            # prepare for save
+            config.repos = list(r.save() for r in self.repos)
+            
+            # save changes
+            fconf.seek(0)
             config.dump(fconf)
         
         title("Repositories:")
@@ -110,8 +111,9 @@ class Updater:
     
     async def update_repos(self):
         title("Updating repos...")
-        tasks = [r.update_repo() for r in self.repos]
-        await asyncio.gather(*tasks)
+        with FDroidRepo.load_cache():
+            tasks = [r.update_repo() for r in self.repos]
+            await asyncio.gather(*tasks)
     
     
     async def check_updates(self):
@@ -143,7 +145,8 @@ class Updater:
                 self.missing[pkg] = app
         
         print("Not found in any repo:")
-        InstalledApp.print_apps_table(self.missing.values())
+        miss: list[Any] = self.missing.values()
+        InstalledApp.print_apps_table(miss)
     
     
     def ask_updates(self):
@@ -161,14 +164,13 @@ class Updater:
             key=lambda i: (i[1][0].installer, i[1][1].label)
         ))
         rows = []
-        for pkg, (inst, upd) in upds.items():
+        for _pkg, (inst, upd) in upds.items():
             rows.append((
                 middle_ellipsis(inst.label, 18),
-                middle_ellipsis(inst.version_name or '?', 18),
-                '->',
-                middle_ellipsis(upd.version_name or '!?', 18)
+                middle_ellipsis(inst.version_name or '?', 18).rjust(18) + ' -> ' +
+                middle_ellipsis(upd.version_name or '!?', 18).ljust(18)
             ))
-        tp.table(rows, 'Label From -> To'.split())
+        tp.table(rows, 'Label  From -> To'.split('  '))
         
         return ask_yes_no("Do you want to update?")
 
@@ -176,8 +178,8 @@ class Updater:
     @a_autoexit
     async def main(self, arg0, *args) -> int:
         self.load_config()
-        return
         await self.update_repos()
+        return 0
         self.load_apps()
         await self.check_updates()
         if not self.ask_updates():

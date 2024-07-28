@@ -1,5 +1,6 @@
 
 import sys, os.path
+from abc import ABC
 from pathlib import Path
 
 from .core.ui import error
@@ -11,8 +12,18 @@ LOCAL_REPO = Path(__file__).absolute().parents[1]
 IS_SITE_PKGS = LOCAL_REPO.parts[-1] == 'site_packages'
 
 
-class __common__:
+class __common__(ABC):
+    PROJDIR: Path
+    LISTER_JAR: Path
     LISTER_MAIN = 'net.micro.adb.Lister.Lister'
+    
+    def __init__(self):
+        self.CONFIG = self.PROJDIR / 'config.toml'
+        self.CACHE = self.PROJDIR / 'cache'
+        self.CACHE_INFO = self.CACHE / 'cache.toml'
+        # try to access other variables
+        for _ in (self.LISTER_JAR,):
+            pass
 
 
 if FROZEN:
@@ -22,12 +33,12 @@ elif IS_SITE_PKGS:
     raise NotImplementedError()
 
 else:  # development
-    class Platform(__common__):
+    class __platform__(__common__):
         PROJDIR = LOCAL_REPO.parent
         LISTER_JAR = PROJDIR / 'dex-lister/build/lister.jar'
-        CONFIG = PROJDIR / 'config.toml'
-        CACHE = PROJDIR / 'cache'
 
+
+Platform = __platform__()
 
 os.makedirs(Platform.CACHE, exist_ok=True)
 

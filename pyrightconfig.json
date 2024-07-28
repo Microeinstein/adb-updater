@@ -1,0 +1,33 @@
+{
+    "include": [
+      "src"
+    ],
+    "pythonVersion": "3.10",
+    "venvPath": ".",
+    "venv": "venv",
+
+    "stubPath": "./typings",
+
+    "reportAny": "none",
+    "reportGeneralTypeIssues": "information",
+    "reportAssignmentType": "none",
+    "reportUnknownArgumentType": "none",
+    "reportUnknownParameterType": "none",
+    "reportUnknownMemberType": "none",
+    "reportUnknownVariableType": "none",
+    "reportMissingParameterType": "none",
+    "reportUnknownLambdaType": "none",
+
+    "reportUnusedImport": "warning",
+    "reportUnusedClass": "warning",
+    "reportUnusedFunction": "warning",
+    "reportUnusedCallResult": "none",
+    "reportUnusedCoroutine": "warning",
+    "reportUnusedVariable": "warning",
+    "reportUnusedExpression": "warning",
+
+    "reportDeprecated": "warning",
+    "reportImplicitOverride": "information",
+    "reportUnreachable": "information",
+    "reportUninitializedInstanceVariable": "information",
+}

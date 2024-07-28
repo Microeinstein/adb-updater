@@ -6,6 +6,7 @@ notes/
 trash/
 __pycache__/
 venv/
+typings/
 cache/
 build/
 lib/

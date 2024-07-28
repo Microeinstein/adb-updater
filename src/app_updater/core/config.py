@@ -1,7 +1,6 @@
 
 from abc import ABC
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import TypeVar
 
 import tomlkit
 
@@ -17,6 +16,8 @@ import tomlkit
 #     def __set__(self, facade, value):
 #         setattr(getattr(facade, 'config'), self.key, value)
 
+
+T = TypeVar('T', bound='TOMLConfig')
 
 class TOMLConfig:
     def __post_init__(self):
@@ -38,14 +39,14 @@ class TOMLConfig:
         super().__delattr__(name)
     
     @classmethod
-    def load(cls, fin) -> "TOMLConfig":
+    def load(cls: type[T], fin) -> T:
         data = tomlkit.load(fin)
         # update() will convert TOMLDocument to dict, unwanted
         for k, v in cls.__dict__.items():
             if not k.startswith('__'):
                 data.setdefault(k, v)
         
-        ret = TOMLConfig()
+        ret: T = TOMLConfig()
         ret.__toml__ = data  # TOMLDocument
         ret.__post_init__()
         return ret
@@ -58,14 +59,14 @@ class TOMLConfig:
 
 
 class ConfigType(ABC):
-    SERIALIZE: List[str]
+    SERIALIZE: list[str]
     
     @classmethod
-    def load(cls, data: Dict[str, Any], **extra):
+    def load(cls, data: dict[str, object], **extra):
         for k in cls.SERIALIZE:
             if k not in data:
                 raise RuntimeError(f"Missing attribute {k!r}.")
         return cls(**data, **extra)
     
-    def save(self) -> Dict[str, Any]:
+    def save(self) -> dict[str, object]:
         return {k: getattr(self, k) for k in self.SERIALIZE}

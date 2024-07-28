@@ -1,11 +1,12 @@
 
 import re
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from dataclasses import dataclass
+from typing import Sequence, Any
 
-from .core.misc import get_base_classes
+import tableprint as tp
 
-__all__ = 'AndroidApp  InstalledApp  FDroidApp'.split()
+from ..core.misc import get_base_classes
+from ..core.ui import middle_ellipsis
 
 
 @dataclass
@@ -33,11 +34,12 @@ class AndroidApp:
     version_name: str
     
     @classmethod
-    def get_installer_name(cls, pkg: str) -> str:
+    def get_installer_name(cls, pkg: str) -> str|None:
         for c in get_base_classes(cls):
             for k, v in c.__dict__.items():
                 if v == pkg:
                     return k.replace('_', ' ').title()
+        return None
 
 
 @dataclass
@@ -48,7 +50,7 @@ class InstalledApp(AndroidApp):
     
     system: bool
     removed: bool
-    installer: Optional[str] = None
+    installer: str|None = None
     
     @classmethod
     def _fetch_foreign_apps(cls, text_iter):
@@ -84,7 +86,7 @@ class InstalledApp(AndroidApp):
             yield cls(**data)
     
     @classmethod
-    def from_lister(cls, japp: Dict) -> "InstalledApp":
+    def from_lister(cls, japp: dict[str, Any]) -> "InstalledApp":
         return InstalledApp(
             package      = japp['pkg'],
             label        = japp['label'],
@@ -96,61 +98,15 @@ class InstalledApp(AndroidApp):
         )
         
     @classmethod
-    def print_apps_table(cls, apps: List["InstalledApp"]):
+    def print_apps_table(cls, apps: Sequence["InstalledApp"]):
         apps = sorted(apps, key=lambda a: (a.installer, a.label))
         rows = []
         for a in apps:
             a: "InstalledApp"
+            inst = cls.get_installer_name(a.installer) or a.installer if a.installer else '?'
             rows.append((
                 middle_ellipsis(a.label, 18),
                 middle_ellipsis(a.version_name or '?', 18),
-                middle_ellipsis(cls.get_installer_name(a.installer), 18),
+                middle_ellipsis(inst, 18),
             ))
         tp.table(rows, 'Label Version Installer'.split())
-
-
-@dataclass
-class FDroidApp(AndroidApp):
-    repo: "FDroidRepo"
-    url: str
-    
-    @classmethod
-    def from_index_v2(cls, repo: "FDroidRepo", pkg: str, json_like: Dict) -> Optional["FDroidApp"]:
-        package = json_like['packages'].get(pkg)
-        if not package:
-            return None
-        
-        meta = package['metadata']
-        last_ver = list(package['versions'].items())[0][1]
-        
-        return FDroidApp(
-            package      = pkg,
-            label        = meta['name']['en-US'],
-            repo         = repo,
-            version_code = last_ver['manifest']['versionCode'],
-            version_name = last_ver['manifest']['versionName'],
-            url          = last_ver['file']['name'],
-        )
-    
-    @classmethod
-    def from_index_v1(cls, repo: "FDroidRepo", pkg: str, json_like: Dict) -> Optional["FDroidApp"]:
-        package = json_like['packages'].get(pkg)
-        if not package:
-            return None
-        last_ver = package[0]
-        
-        apps = json_like['apps']
-        if not isinstance(apps, dict):
-            # convert this shit, only the first time
-            apps = json_like['apps'] = {app['packageName']: v for app in apps}
-            
-        meta = apps[pkg]
-        
-        return FDroidApp(
-            package      = pkg,
-            label        = meta['localized']['en-US']['name'],
-            repo         = repo,
-            version_code = last_ver['versionCode'],
-            version_name = last_ver['versionName'],
-            url          = '/' + last_ver['apkName'],
-        )
