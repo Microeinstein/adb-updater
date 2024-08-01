@@ -92,3 +92,9 @@ class AndroidPhone:
                 f: tarfile.ExFileObject = tar.extractfile(member)
                 return f
         raise RuntimeError("Unable to extract file.")
+    
+    def install_app(self, path: str|Path):
+        assert self.device
+        # 30MB -> 5 min timeout
+        timeout = int(max(30, os.path.getsize(path) / 1024 / 100) * 1000)
+        self.device.Install(str(path), timeout_ms=timeout)

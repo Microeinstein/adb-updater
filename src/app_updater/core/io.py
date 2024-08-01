@@ -17,7 +17,7 @@ def open_or_create(file, mode: str, *a, **kw) -> io.FileIO | IO[Any]:
         return open(file, mode, *a, **kw)
 
 
-def chunked_stream(stream: io.RawIOBase, chunksize=CHUNKSIZE) -> Generator[bytes]:
+def chunked_stream(stream: io.RawIOBase | IO[bytes], chunksize=CHUNKSIZE) -> Generator[bytes]:
     while True:
         c = stream.read(chunksize)
         if not c:

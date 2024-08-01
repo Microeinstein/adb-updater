@@ -30,7 +30,7 @@ async def try_get_url(
     etag: str|None = None,
     server_ts: int|None = None
 ) -> tuple[Path|None, str|None]:
-    print('  ', url, sep='')
+    # print('  ', url, sep='')
     
     cur_ts = dest.stat().st_mtime if dest.exists() else 0
     if server_ts and cur_ts >= server_ts:

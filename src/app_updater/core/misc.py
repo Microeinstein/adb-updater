@@ -1,11 +1,47 @@
 
+import itertools
+
 from dataclasses import dataclass, field
 from inspect import getmro
-from typing import Callable, Any
+from collections.abc import Generator, Iterable
+from typing import Callable, Any, TypeVar
+
+
+T = TypeVar('T')
 
 
 def get_base_classes(cls):
     return getmro(cls)
+
+
+def round_robin(it: Iterable[T], key: Callable[[T], Any]) -> Generator[T]:
+    srt = sorted(it, key=key)
+    if not srt:
+        return
+    
+    cursors = dict()  # key: start_index
+    last_key = None
+    for i, x in enumerate(srt):
+        k = key(x)
+        if last_key is None or last_key != k:
+            cursors[k] = i
+            last_key = k
+    
+    k2, v2 = next(iter(cursors.items()))
+    for (k1, v1), (k2, v2) in itertools.pairwise(cursors.items()):
+        cursors[k1] = iter(range(v1, v2))
+    cursors[k2] = iter(range(v2, len(srt)))
+    
+    while cursors:
+        exhaust = []
+        for k, c in cursors.items():
+            i = next(c, None)
+            if i is None:
+                exhaust.append(k)
+                continue
+            yield srt[i]
+        for k in exhaust:
+            del cursors[k]
 
 
 AnyFunc = Callable[..., Any]

@@ -3,9 +3,14 @@ import sqlite3
 from pathlib import Path
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Callable, Generic, TypeVar
+from collections.abc import Awaitable
+from typing import Callable, TypeVar, Any
 
 from .misc import optional_decor_args
+
+
+T = TypeVar('T')
+R = TypeVar('R')
 
 
 @optional_decor_args
@@ -21,6 +26,16 @@ def a_autoexit(func):
         return ret
     
     return wrapper
+
+
+async def with_all(*objs: R,
+                   opener: Callable[[R], Any],
+                   callback: Callable[[], Awaitable[T]]) -> T:
+    if not objs:
+        return await callback()
+    [obj, *objs] = objs
+    async with opener(obj):
+        return await with_all(*objs, opener=opener, callback=callback)
 
 
 CM = AbstractContextManager[object]

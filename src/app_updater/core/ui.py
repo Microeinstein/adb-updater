@@ -41,3 +41,5 @@ def ask_yes_no(prompt: str, default=False):
                 return False
     except KeyboardInterrupt:
         return False
+    finally:
+        print()

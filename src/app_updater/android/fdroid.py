@@ -4,7 +4,7 @@ import os, io
 from pathlib import Path
 from dataclasses import dataclass, field
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from typing import ClassVar
 
 import aiohttp, json_stream, simdjson
@@ -30,12 +30,13 @@ class FDroidRepo(ConfigType):
     name: str
     address: str
     cache_path: Path|None = field(init=False, default=None)
-    apps: dict[str, AndroidApp] = field(init=False, default_factory=dict)
+    apps: dict[str, "FDroidApp"] = field(init=False, default_factory=dict)
     cache_info: ClassVar[CacheInfo]
+    session: aiohttp.ClientSession|None = field(init=False, default=None)
 
 
     def __post_init__(self):
-        base = Platform.CACHE / url2path(self.address)
+        base = Platform.CACHE_INDEX / url2path(self.address)
         
         fentry = base / self.JSON_ENTRY
         if not fentry.is_file():
@@ -69,22 +70,31 @@ class FDroidRepo(ConfigType):
         yield
         with open(Platform.CACHE_INFO, 'wt') as fout:
             cls.cache_info.dump(fout)
+    
+    
+    @asynccontextmanager
+    async def connect(self):
+        async with aiohttp.ClientSession() as session:
+            self.session = session
+            yield
+            self.session = None
 
 
     async def update_repo(self):
         etags = self.cache_info.etags
         
         async def get(filename, **kw):
+            assert self.session is not None
             src = rel_urljoin(self.address, filename)
-            dest = Platform.CACHE / url2path(src)
+            dest = Platform.CACHE_INDEX / url2path(src)
             pathout, etag = await try_get_url(
-                session, src, dest, etags.get(src), **kw
+                self.session, src, dest, etags.get(src), **kw
             )
             if etag:
                 etags[src] = etag
             return pathout
         
-        async with aiohttp.ClientSession() as session:
+        async with self.connect():
             entry_path = await get(self.JSON_ENTRY)
             
             if not entry_path:
@@ -110,6 +120,10 @@ class FDroidRepo(ConfigType):
             # with open(self.cache_path, 'r') as fin:
             #     json_like = json_stream.load(fin, persistent=True)
             json_like = parser.load(self.cache_path)
+            json_like = dict(  # unwrap first level to allow edits
+                packages = json_like['packages'],
+                apps     = json_like['apps'],
+            )
             for p in pkgs:
                 app = FDroidApp.from_index_v1(self, p, json_like)
                 if app:
@@ -125,12 +139,23 @@ class FDroidRepo(ConfigType):
                     self.apps[p] = app
         
         print(f"  {self.name}... ok ({len(self.apps)})")
+    
+    
+    async def download_app(self, app: "FDroidApp") -> Path|None:
+        assert self.session is not None
+        src = rel_urljoin(self.address, app.url)
+        dest = Platform.CACHE_APPS / url2path(src)
+        # do not redownload if existing, ignoring modified time and etag
+        pathout, _etag = await try_get_url(self.session, src, dest, None, 1)
+        return pathout
 
 
 @dataclass
 class FDroidApp(AndroidApp):
     repo: FDroidRepo
     url: str
+    local_path: Path|None = None
+    
     
     @classmethod
     def from_index_v2(cls, repo: FDroidRepo, pkg: str, json_like: dict[str, Any]) -> "FDroidApp|None":
@@ -150,6 +175,7 @@ class FDroidApp(AndroidApp):
             url          = last_ver['file']['name'],
         )
     
+    
     @classmethod
     def from_index_v1(cls, repo: FDroidRepo, pkg: str, json_like: dict[str, Any]) -> "FDroidApp|None":
         package = json_like['packages'].get(pkg)
@@ -158,9 +184,9 @@ class FDroidApp(AndroidApp):
         last_ver = package[0]
         
         apps: list[Any] | dict[str, Any] = json_like['apps']
-        if isinstance(apps, list):
-            # convert this shit, only the first time
-            apps = json_like['apps'] = {app['packageName']: app for app in apps}
+        # convert this shit, only the first time
+        if isinstance(apps, list) or isinstance(apps, simdjson.Array):
+            apps = json_like['apps'] = {app['packageName']: app for app in apps}  # type: ignore[all]
             
         meta = apps[pkg]
         
@@ -172,3 +198,8 @@ class FDroidApp(AndroidApp):
             version_name = last_ver['versionName'],
             url          = '/' + last_ver['apkName'],
         )
+    
+    
+    async def download(self):
+        self.local_path = await self.repo.download_app(self)
+        return self

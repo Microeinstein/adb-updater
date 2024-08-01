@@ -21,6 +21,8 @@ class __common__(ABC):
         self.CONFIG = self.PROJDIR / 'config.toml'
         self.CACHE = self.PROJDIR / 'cache'
         self.CACHE_INFO = self.CACHE / 'cache.toml'
+        self.CACHE_INDEX = self.CACHE / 'index'
+        self.CACHE_APPS = self.CACHE / 'apps'
         # try to access other variables
         for _ in (self.LISTER_JAR,):
             pass
