@@ -13,7 +13,7 @@ from .core.context import ContextProp, a_autoexit, with_all
 from .core.io import chunked_stream
 from .core.config import TOMLConfig
 from .core.ui import *
-from .core.misc import round_robin
+from .core.misc import Dummy, round_robin
 from .android.phone import *
 from .android.apps import *
 from .android.fdroid import *
@@ -32,7 +32,6 @@ class Updater:
     phone: AndroidPhone = ContextProp()
     repos: list[FDroidRepo]
     ignore_pkg: list[str]
-    apps: dict[str, InstalledApp]  # foreign
     updates: dict[str, tuple[InstalledApp, FDroidApp]]
     missing: dict[str, InstalledApp]
 
@@ -79,42 +78,50 @@ class Updater:
     
     def load_apps(self):
         title("Getting packages...")
-        self.apps = {}
         
         # with self.phone.get_dumpsys_packages() as dump:
         #     dumpsys = TextIterStream(dumpsys)
         #     for app in InstalledApp._fetch_foreign_apps(dumpsys):
         #         self.apps[app.package] = app
         
-        n_total = 0
-        n_system = 0
-        n_removed = 0
-        n_foreign = 0
-        n_ignored = 0
+        n = Dummy(
+            total = 0,
+            system = 0,
+            removed = 0,
+            foreign = 0,
+            ignored = 0,
+        )
         
-        print('\x1b7Awaiting response from device...')
-        for japp in self.phone.get_package_list():
-            app = InstalledApp.from_lister(japp)
-            ign = app.package in self.ignore_pkg
-            n_total += 1
-            n_system += int(app.system)
-            n_removed += int(app.removed)
-            n_ignored += int(ign)
-            if not app.system and (not app.installer or app.installer in AndroidApp.OPEN_STORES):
-                n_foreign += 1
-                if not ign:
-                    self.apps[app.package] = app
+        def app_filter(app: InstalledApp):
+            nonlocal n
+            valid = False
             
-            print(f'\x1b8\x1b[0J', end='')
-            for k, v in (
-                ('total', n_total),
-                ('system', n_system),
-                ('removed', n_removed),
-                ('closed', n_total - n_system - n_foreign),
-                ('foreign', n_foreign),
-                ('ignored', n_ignored),
-            ):
-                print(f"  {k:<8} : {v}")
+            ign = app.package in self.ignore_pkg
+            n.total += 1
+            n.system += int(app.system)
+            n.removed += int(app.removed)
+            n.ignored += int(ign)
+            if not app.system and (not app.installer or app.installer in AndroidApp.OPEN_STORES):
+                n.foreign += 1
+                valid = not ign
+                
+            return valid
+        
+        print('\x1b7', end='')
+        
+        self.phone.load_phone_info(app_filter)
+        
+        print(f'\x1b8\x1b[0J', end='')
+        for k, v in (
+            ('total', n.total),
+            ('system', n.system),
+            ('removed', n.removed),
+            ('closed', n.total - n.system - n.foreign),
+            ('foreign', n.foreign),
+            ('ignored', n.ignored),
+        ):
+            print(f"  {k:<8} : {v}")
+            
         
         # InstalledApp.print_apps_table(self.apps.values())
     
@@ -129,16 +136,15 @@ class Updater:
     async def check_updates(self):
         title("Loading repos apps...")
         
-        pkgs = self.apps.keys()
-        async def upd(r):
-            r.load_repo_apps(pkgs)
+        async def upd(r: FDroidRepo):
+            r.load_repo_apps(self.phone)
         await asyncio.gather(*[upd(r) for r in self.repos])
         
         title("Checking updates...")
         self.updates = {}
         self.missing = {}
         
-        for pkg, app in self.apps.items():
+        for pkg, app in self.phone.apps.items():
             app: InstalledApp
             found = False
             
@@ -148,10 +154,12 @@ class Updater:
                 if not repo_app:
                     continue
                 found = True
+                # app is found, but must also get latest version across repos
                 if repo_app.version_code <= app.version_code:
                     continue
                 if pkg in self.updates and repo_app.version_code <= self.updates[pkg][1].version_code:
                     continue
+
                 self.updates[pkg] = (app, repo_app)
             
             if not found:  # in any repo
@@ -162,30 +170,34 @@ class Updater:
             key=lambda i: (i[1][0].installer or 'n/a', i[1][1].label)
         ))
         
-        print("Not found in any repo:")
-        miss: list[Any] = self.missing.values()
-        InstalledApp.print_apps_table(miss)
+        if not self.updates:
+            if not self.missing:
+                print(f"Up to date.")
+            else:
+                print(f"Up to date, {len(self.missing)} missing.")
+            return False
+        
+        if self.missing:
+            print("Missing from repos:")
+            miss: list[Any] = self.missing.values()
+            InstalledApp.print_apps_table(miss)
+        # else:
+        #     print('  (none)')
+        
+        return True
     
     
     def ask_updates(self):
-        if not self.updates:
-            if not self.missing:
-                title(f"Up to date.")
-            else:
-                title(f"Up to date, {len(self.missing)} missing.")
-            return False
-        
         title(f"{len(self.updates)} updates are available:")
         
         rows = []
         for _pkg, (inst, upd) in self.updates.items():
             rows.append((
-                middle_ellipsis(inst.label, 18),
+                f"{middle_ellipsis(inst.label, 18)} @ {upd.repo.name:>14s}",
                 middle_ellipsis(inst.version_name or '?', 18).rjust(18) + ' -> ' +
                 middle_ellipsis(upd.version_name or '!?', 18).ljust(18),
-                upd.repo.name
             ))
-        tp.table(rows, 'Label  From -> To  From repo'.split('  '))
+        tp.table(rows, 'Label @ Repo  From -> To'.split('  '))
         
         return ask_yes_no(f"Do you want to update {len(self.updates)} apps?")
     
@@ -262,7 +274,8 @@ class Updater:
             self.load_config()
             await self.update_repos()
             self.load_apps()
-            await self.check_updates()
+            if not await self.check_updates():
+                return
             if not self.ask_updates():
                 return
             await self.download_updates()

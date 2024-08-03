@@ -1,7 +1,8 @@
 
 import re
 from dataclasses import dataclass
-from typing import Sequence, Any
+from collections.abc import Sequence
+from typing import Any
 
 import tableprint as tp
 
@@ -32,6 +33,7 @@ class AndroidApp:
     label: str
     version_code: str
     version_name: str
+    signer: str
     
     @classmethod
     def get_installer_name(cls, pkg: str) -> str|None:
@@ -40,6 +42,16 @@ class AndroidApp:
                 if v == pkg:
                     return k.replace('_', ' ').title()
         return None
+    
+    def is_compatible(self, *,
+        version_code: str,
+        signer: str,
+        **kw,
+    ) -> bool:
+        return (
+            version_code >= self.version_code  # laxed
+            and signer == self.signer
+        )
 
 
 @dataclass
@@ -95,11 +107,12 @@ class InstalledApp(AndroidApp):
             system       = japp['system'],
             removed      = japp['removed'],
             installer    = japp['installer'],
+            signer       = japp['signer'],
         )
         
     @classmethod
     def print_apps_table(cls, apps: Sequence["InstalledApp"]):
-        apps = sorted(apps, key=lambda a: (a.installer, a.label))
+        apps = sorted(apps, key=lambda a: (a.installer or '', a.label))
         rows = []
         for a in apps:
             a: "InstalledApp"

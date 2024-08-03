@@ -11,10 +11,12 @@ import aiohttp, json_stream, simdjson
 
 from ..core.io import open_or_create
 from ..core.network import *
+from ..core.misc import jobj, jlist
 from ..core.context import SQLite
 from ..core.config import ConfigType, TOMLConfig
 from ..platform import Platform
 from .apps import *
+from .phone import AndroidPhone
 
 
 class CacheInfo(TOMLConfig):
@@ -109,12 +111,12 @@ class FDroidRepo(ConfigType):
                 return
 
 
-    def load_repo_apps(self, pkgs: list[str]):
+    def load_repo_apps(self, phone: AndroidPhone):
         if not self.cache_path or not self.cache_path.is_file():
             return
         
         parser = simdjson.Parser()
-        json_like: dict[str, object]
+        json_like: jobj[...]
         
         if self.cache_path.match(self.JSON_INDEX_V1):
             # with open(self.cache_path, 'r') as fin:
@@ -124,19 +126,19 @@ class FDroidRepo(ConfigType):
                 packages = json_like['packages'],
                 apps     = json_like['apps'],
             )
-            for p in pkgs:
-                app = FDroidApp.from_index_v1(self, p, json_like)
+            for pkg, iapp in phone.apps.items():
+                app = FDroidApp.from_index_v1(self, pkg, json_like, phone, iapp)
                 if app:
-                    self.apps[p] = app
+                    self.apps[pkg] = app
         
         else:  # v2
             # with open(self.cache_path, 'r') as fin:
             #     json_like = json_stream.load(fin, persistent=True)
             json_like = parser.load(self.cache_path)
-            for p in pkgs:
-                app = FDroidApp.from_index_v2(self, p, json_like)
+            for pkg, iapp in phone.apps.items():
+                app = FDroidApp.from_index_v2(self, pkg, json_like, phone, iapp)
                 if app:
-                    self.apps[p] = app
+                    self.apps[pkg] = app
         
         print(f"  {self.name}... ok ({len(self.apps)})")
     
@@ -154,39 +156,72 @@ class FDroidRepo(ConfigType):
 class FDroidApp(AndroidApp):
     repo: FDroidRepo
     url: str
+    nativecode: list[str]
+    min_sdk_ver: int
     local_path: Path|None = None
     
     
     @classmethod
-    def from_index_v2(cls, repo: FDroidRepo, pkg: str, json_like: dict[str, Any]) -> "FDroidApp|None":
-        package = json_like['packages'].get(pkg)
+    def from_index_v2(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], phone: AndroidPhone, iapp: InstalledApp) -> "FDroidApp|None":
+        package: jobj[...] = json_like['packages'].get(pkg)
         if not package:
             return None
         
-        meta = package['metadata']
-        last_ver = list(package['versions'].items())[0][1]
+        last_compat: jobj[jobj[...]]
+        for vers in package['versions'].values():
+            last_compat = vers
+            manifest    = last_compat['manifest']
+            verinfo = dict(
+                signer       = manifest['signer']['sha256'][0],
+                version_code = manifest['versionCode'],
+                min_sdk_ver  = manifest.get('usesSdk', {}).get('minSdkVersion', 1),
+                nativecode   = list(manifest.get('nativecode', [])),
+            )
+            
+            if iapp.is_compatible(**verinfo) and phone.is_compatible(**verinfo):
+                break
+        else:
+            return None
+        
+        meta: jobj[jobj[...]] = package['metadata']
         
         return FDroidApp(
             package      = pkg,
             label        = meta['name']['en-US'],
             repo         = repo,
-            version_code = last_ver['manifest']['versionCode'],
-            version_name = last_ver['manifest']['versionName'],
-            url          = last_ver['file']['name'],
+            version_name = manifest['versionName'],
+            url          = last_compat['file']['name'],
+            **verinfo
         )
     
     
     @classmethod
-    def from_index_v1(cls, repo: FDroidRepo, pkg: str, json_like: dict[str, Any]) -> "FDroidApp|None":
-        package = json_like['packages'].get(pkg)
+    def from_index_v1(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], phone: AndroidPhone, iapp: InstalledApp) -> "FDroidApp|None":
+        package: jlist[jobj[...]] = json_like['packages'].get(pkg)
         if not package:
             return None
-        last_ver = package[0]
         
-        apps: list[Any] | dict[str, Any] = json_like['apps']
+        last_compat: jobj[...]
+        for vers in package:
+            last_compat = vers
+            verinfo = dict(
+                version_code = last_compat['versionCode'],
+                signer       = last_compat['signer'],
+                min_sdk_ver  = last_compat.get('minSdkVersion', 1),
+                nativecode   = list(last_compat.get('nativecode', [])),
+            )
+            
+            if iapp.is_compatible(**verinfo) and phone.is_compatible(**verinfo):
+                break
+        else:
+            return None
+        
+        apps = json_like['apps']
         # convert this shit, only the first time
         if isinstance(apps, list) or isinstance(apps, simdjson.Array):
-            apps = json_like['apps'] = {app['packageName']: app for app in apps}  # type: ignore[all]
+            apps_list: list[jobj[...]] = apps
+            apps: jobj[jobj[...]]
+            apps = json_like['apps'] = {app['packageName']: app for app in apps_list}
             
         meta = apps[pkg]
         
@@ -194,9 +229,9 @@ class FDroidApp(AndroidApp):
             package      = pkg,
             label        = meta['localized']['en-US']['name'],
             repo         = repo,
-            version_code = last_ver['versionCode'],
-            version_name = last_ver['versionName'],
-            url          = '/' + last_ver['apkName'],
+            version_name = last_compat['versionName'],
+            url          = '/' + last_compat['apkName'],
+            **verinfo
         )
     
     

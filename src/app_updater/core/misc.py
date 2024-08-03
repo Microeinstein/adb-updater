@@ -4,10 +4,26 @@ import itertools
 from dataclasses import dataclass, field
 from inspect import getmro
 from collections.abc import Generator, Iterable
-from typing import Callable, Any, TypeVar
+from typing import Callable, Any, TypeVar, TypeAlias, Generic
 
 
 T = TypeVar('T')
+
+jvalue: TypeAlias = None | str | int | float | bool
+J = TypeVar('J')
+jlist: TypeAlias = list[J]
+jobj: TypeAlias = dict[str, J]
+
+
+class Dummy(Generic[T]):
+    def __init__(self, **kw: T):
+        self.__dict__ = kw
+    
+    def __getattr__(self, name: str) -> T:
+        raise AttributeError(name=name, obj=self)
+    
+    def __setattr__(self, name: str, value: Any, /) -> None:
+        super().__setattr__(name, value)
 
 
 def get_base_classes(cls):
