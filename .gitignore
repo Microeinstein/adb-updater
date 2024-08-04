@@ -1,5 +1,8 @@
 .*
 *.code-workspace
+*.egg-info
+*.spec
+
 config.toml
 
 notes/
@@ -9,4 +12,5 @@ venv/
 typings/
 cache/
 build/
+dist/
 lib/

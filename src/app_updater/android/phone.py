@@ -38,12 +38,8 @@ class AndroidPhone:
             print("No adb local key (todo)")
             return None
         
-        try:
-            device = adb_commands.AdbCommands()
-            device.ConnectDevice(rsa_keys=[signer])
-        except usb_ex.DeviceNotFoundError as ex:
-            print(ex.args[0])
-            return None
+        device = adb_commands.AdbCommands()
+        device.ConnectDevice(rsa_keys=[signer])
         
         self.device = device
         return self
@@ -96,11 +92,12 @@ class AndroidPhone:
         # use simdjson, but it requires disk usage
         raw = RawIterStream(raw_iter)
         gz = GzipDecompStream(raw)
-        cache = Platform.CACHE / 'phone_apps.json'
+        cache = Platform.CACHE_DIR / 'phone_apps.json'
         with open(cache, 'wb') as fout:
             for chunk in chunked_stream(gz):
                 fout.write(chunk)
         
+        print('Parsing response from device...')
         parser = simdjson.Parser()
         js: jobj[...] = parser.load(cache)
         

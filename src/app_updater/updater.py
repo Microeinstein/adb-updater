@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 
 import tableprint as tp
+import libusb1
 from usb1 import USBError
-from adb import usb_exceptions
+
 
 from .core.context import ContextProp, a_autoexit, with_all
-from .core.io import chunked_stream
+from .core.io import chunked_stream, open_or_create
 from .core.config import TOMLConfig
 from .core.ui import *
 from .core.misc import Dummy, round_robin
@@ -22,16 +23,16 @@ from .platform import Platform
 
 class UpdaterConfig(TOMLConfig):
     ignore_pkg: list[str] = ['ignore.during.updates']
-    repos: list[dict[str, Any]]
+    repos: list[dict[str, Any]] = []
 
 
 class Updater:
     FDROID_BKP_DB = f'apps/{AndroidApp.FDROID_APP}/db/fdroid_db'
-    FDROID_DB = Platform.CACHE / Path(os.path.basename(FDROID_BKP_DB))
+    FDROID_DB = Platform.CACHE_DIR / Path(os.path.basename(FDROID_BKP_DB))
     
     phone: AndroidPhone = ContextProp()
-    repos: list[FDroidRepo]
     ignore_pkg: list[str]
+    repos: list[FDroidRepo]
     updates: dict[str, tuple[InstalledApp, FDroidApp]]
     missing: dict[str, InstalledApp]
 
@@ -53,8 +54,9 @@ class Updater:
     def load_config(self):
         title("Loading config...")
         
-        with open(Platform.CONFIG, 'r+t') as fconf:
+        with open_or_create(Platform.CONFIG, 'r+t') as fconf:
             config = UpdaterConfig.load(fconf)
+            self.ignore_pkg = config.ignore_pkg
         
             repos = config.repos
             if not repos:
@@ -62,7 +64,6 @@ class Updater:
             else:
                 repos = (FDroidRepo.load(r) for r in repos)
             self.repos = list(repos)
-            self.ignore_pkg = config.ignore_pkg
             
             # prepare for save
             config.repos = list(r.save() for r in self.repos)
@@ -107,11 +108,11 @@ class Updater:
                 
             return valid
         
-        print('\x1b7', end='')
+        print('\x1b7', end='', flush=True)
         
         self.phone.load_phone_info(app_filter)
         
-        print(f'\x1b8\x1b[0J', end='')
+        print(f'\x1b8\x1b[0J', end='', flush=True)
         for k, v in (
             ('total', n.total),
             ('system', n.system),
@@ -253,7 +254,7 @@ class Updater:
             if not upd.local_path:
                 continue
             
-            print(f"  {upd.label} ({upd.version_name})...  ", end='')
+            print(f"  {upd.label} ({upd.version_name})...  ", end='', flush=True)
             try:
                 start = time.time()
                 self.phone.install_app(upd.local_path)
@@ -280,6 +281,15 @@ class Updater:
                 return
             await self.download_updates()
             self.install_updates()
+            return 0
+        
+        except usb_ex.DeviceNotFoundError as ex:
+            error(ex.args[0])
             
-        except (USBError, usb_exceptions.CommonUsbError):
-            error("Phone does not respond :(")
+        except USBError as ex:
+            if ex.value == libusb1.LIBUSB_ERROR_BUSY:  # type: ignore[enum]
+                error("Phone is busy, make sure adb is not running (adb kill-server).")
+            else:
+                error("Phone does not respond :(")
+        
+        return 1

@@ -4,4 +4,3 @@ pysimdjson
 readchar
 tableprint
 tomlkit
-git+'https://github.com/MasonAmerica/python-adb.git'

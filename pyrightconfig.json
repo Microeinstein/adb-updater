@@ -29,5 +29,6 @@
     "reportDeprecated": "warning",
     "reportImplicitOverride": "information",
     "reportUnreachable": "information",
+    "reportRedeclaration": "information",
     "reportUninitializedInstanceVariable": "information",
 }
