@@ -3,6 +3,9 @@
 set -euo pipefail
 # set -x
 
+SELF="$(realpath -ms "${BASH_SOURCE[0]}")"
+cd "$(dirname "$SELF")" || exit
+
 unset _JAVA_OPTIONS  # too much output for nothing
 clear
 
@@ -14,7 +17,7 @@ SRC_VER=1.8
 MIN_API=29  # int
 SDK_VER=34  # int
 
-DIR_PROJ="$(dirname "$(realpath -ms "${BASH_SOURCE[0]}" )" )"
+DIR_PROJ="$PWD"
 DIR_LIB="$DIR_PROJ/lib"
 DIR_BUILD="$(realpath -ms "${DIR_BUILD:-"${DIR_PROJ}/build"}" )"
 DIR_CLASSES="$DIR_BUILD/classes"
@@ -34,7 +37,7 @@ SDK_TOOLS="$SDK/platforms-tools"
 LIB_ANDROID="$SDK_PLAT/android.jar"
 LIB_LAMBDA="$SDK_BUILD/core-lambda-stubs.jar"
 LIB_FRAMEWORK="$DIR_LIB/framework.jar"
-LIB_CORE_OJ="$DIR_LIB/core-oj.jar"
+# LIB_CORE_OJ="$DIR_LIB/core-oj.jar"
 
 
 cat <<EOF
@@ -54,10 +57,18 @@ fi
 export PATH="$SDK_BUILD:$SDK_TOOLS:$PATH"
 
 
+all_installed() {
+    for d in "$@"; do
+        if ! command -v "$d" &>/dev/null; then
+            return 1
+        fi
+    done
+}
+
 check_bin_deps() {
     local miss=()
     for d in "$@"; do
-        if ! command -V "$d" &>/dev/null; then
+        if ! command -v "$d" &>/dev/null; then
             miss+=("$d")
         fi
     done
@@ -138,7 +149,7 @@ find_sources() {
         -type f
         -not -name '.*'
         -and -not  -iname "$(basename "$LIB_FRAMEWORK")"
-        -and -not  -iname "$(basename "$LIB_CORE_OJ")"
+        # -and -not  -iname "$(basename "$LIB_CORE_OJ")"
         -and  -iname
     )
     
@@ -183,7 +194,7 @@ compile_java() (
         "${libs[@]}"
         "$DIR_GEN"
         "$LIB_LAMBDA"
-        "$LIB_CORE_OJ"
+        # "$LIB_CORE_OJ"
         "$LIB_FRAMEWORK"
     )
     
@@ -241,9 +252,14 @@ compile_dex() (
 
 add_resources() (
     title "Adding extra resources..."
-    check_bin_deps  zip
     cd "$DIR_PROJ/src"
+
+    if all_installed  7z; then
+        run 7z a "$DIR_BUILD/$PROJ_BIN"  'AndroidManifest.xml'
+        return
+    fi
     
+    check_bin_deps  zip
     run zip -ru "$DIR_BUILD/$PROJ_BIN"  'AndroidManifest.xml'
 )
 
@@ -283,7 +299,7 @@ main() {
     # BOOTCLASSPATH
     # SYSTEMSERVERCLASSPATH
     get_phone_lib '/system/framework/framework.jar'
-    get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
+    # get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
     generate_buildconfig
     find_sources
     compile_aidl

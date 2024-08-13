@@ -5,7 +5,7 @@
             "name": "App updater",
             "type": "debugpy",
             "request": "launch",
-            "module": "app_updater",
+            "module": "adb_updater",
             "cwd": "${workspaceFolder}",
             "autoReload": {
                 "enable": true

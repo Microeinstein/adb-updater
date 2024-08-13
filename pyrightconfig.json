@@ -30,5 +30,6 @@
     "reportImplicitOverride": "information",
     "reportUnreachable": "information",
     "reportRedeclaration": "information",
+    "reportConstantRedefinition": "none",
     "reportUninitializedInstanceVariable": "information",
 }

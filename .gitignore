@@ -1,16 +1,19 @@
-.*
-*.code-workspace
-*.egg-info
-*.spec
+# compatible as dockerignore
+**/.*
+**/*.code-workspace
+**/*.egg-info
+**/*.spec
 
-config.toml
+**/config.toml
 
-notes/
-trash/
-__pycache__/
-venv/
-typings/
-cache/
-build/
-dist/
-lib/
+**/notes/
+**/trash/
+**/__pycache__/
+**/venv/
+**/typings/
+**/cache/
+**/build/
+**/dist/
+**/lib/
+**/bin/*
+!**/bin/*.sh

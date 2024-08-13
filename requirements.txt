@@ -1,6 +1,10 @@
+# certifi
 aiohttp
 json-stream
 pysimdjson
+tomlkit
+libusb1
+cryptography
+colorama
 readchar
 tableprint
-tomlkit

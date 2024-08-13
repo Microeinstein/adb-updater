@@ -108,11 +108,8 @@ class Updater:
                 
             return valid
         
-        print('\x1b7', end='', flush=True)
-        
         self.phone.load_phone_info(app_filter)
         
-        print(f'\x1b8\x1b[0J', end='', flush=True)
         for k, v in (
             ('total', n.total),
             ('system', n.system),
@@ -283,13 +280,21 @@ class Updater:
             self.install_updates()
             return 0
         
+        except KeyboardInterrupt:
+            return 0
+        
         except usb_ex.DeviceNotFoundError as ex:
             error(ex.args[0])
             
         except USBError as ex:
             if ex.value == libusb1.LIBUSB_ERROR_BUSY:  # type: ignore[enum]
                 error("Phone is busy, make sure adb is not running (adb kill-server).")
+            elif ex.value == libusb1.LIBUSB_ERROR_NO_DEVICE:  # type: ignore[enum]
+                error("No phone found :(")
+            elif ex.value == libusb1.LIBUSB_ERROR_TIMEOUT:  # type: ignore[enum]
+                error("Connection timeout :(")
             else:
-                error("Phone does not respond :(")
+                error("Unknown error :(")
+                error(ex)
         
         return 1

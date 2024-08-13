@@ -1,16 +1,17 @@
 
-import os.path, io, tarfile
+import sys, os.path, io, tarfile
 from pathlib import Path
 from typing import IO, Callable
 
 import simdjson
 from adb import adb_commands, sign_cryptography
+from adb import android_pubkey as adbkey
 from adb import usb_exceptions as usb_ex
 
 from ..core.io import *
-from ..core.ui import title
+from ..core.ui import restore_cursor_clear, save_cursor, title, ask_yes_no
 from ..core.misc import jobj, PropMessage
-from ..platform import Platform
+from ..platform import USERNAME, HOSTNAME, Platform
 from .apps import InstalledApp
 
 # NOTE: adb_commands.AdbCommands.BytesStreamingShell requires a byte-format command
@@ -26,21 +27,40 @@ class AndroidPhone:
     min_sdk: int
     sdk: int
     apps: jobj[InstalledApp]
+    
+    
+    @staticmethod
+    def get_adbkey():
+        local_key = os.path.expanduser('~/.android/adbkey')
+        
+        if not Path(local_key).exists():
+            os.makedirs(os.path.dirname(local_key), exist_ok=True)
+            adbkey.keygen(local_key)
+        
+        return sign_cryptography.CryptographySigner(local_key)
 
 
     def __enter__(self):
+        save_cursor()
         title("Connecting to phone...")
-        local_key = os.path.expanduser('~/.android/adbkey')
+        signer = AndroidPhone.get_adbkey()
         
-        if Path(local_key).exists():
-            signer = sign_cryptography.CryptographySigner(local_key)
-        else:
-            print("No adb local key (todo)")
-            return None
+        while True:
+            try:
+                print('Awaiting authorization... (30s)')
+                device = adb_commands.AdbCommands()
+                device.ConnectDevice(
+                    default_timeout_ms=30 * 1000,
+                    auth_timeout_ms=30 * 1000,
+                    banner=f"{USERNAME}@{HOSTNAME}",
+                    rsa_keys=[signer]
+                )
+                break
+            except usb_ex.DeviceAuthError:
+                if not ask_yes_no('Please accept auth key on your device. Retry?', True):
+                    sys.exit(0)
         
-        device = adb_commands.AdbCommands()
-        device.ConnectDevice(rsa_keys=[signer])
-        
+        restore_cursor_clear()
         self.device = device
         return self
 
@@ -75,6 +95,7 @@ class AndroidPhone:
         lister_fn = os.path.basename(Platform.LISTER_JAR)
         dest = f"{AndroidPhone.TMP}/{lister_fn}"
         
+        save_cursor()
         print('Awaiting response from device...')
         self.device.Push(str(Platform.LISTER_JAR), dest, timeout_ms=30000)
         
@@ -118,6 +139,8 @@ class AndroidPhone:
             sdk            = bu['VERSION']['SDK_INT'],
             apps           = apps,
         ))
+        
+        restore_cursor_clear()
     
     
     def get_package_backup(self, package: str) -> io.RawIOBase:
