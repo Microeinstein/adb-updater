@@ -4,6 +4,7 @@ from abc import ABC
 from dataclasses import dataclass, field
 from collections.abc import Iterator, Generator
 from typing import IO, TypeVar, Generic, Any
+from typing_extensions import override
 
 
 CHUNKSIZE = 1024 * 4 * 4
@@ -46,8 +47,13 @@ class IterStream(ABC, Generic[Tbuff, Tstr], io.IOBase):
         self.iter = iter(self.iter)
         self.leftover = self.__annotations__['leftover']()
     
+    @override
     def seekable(self): return False
+    
+    @override
     def readable(self): return True
+    
+    @override
     def writable(self): return False
     
     def _seek_to_cut(self, buffer, size):
@@ -56,6 +62,7 @@ class IterStream(ABC, Generic[Tbuff, Tstr], io.IOBase):
     def _read_limiter(self, buffer):
         return False
     
+    @override
     def close(self):
         flush_stream(self)
         super().close()
@@ -92,9 +99,11 @@ class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
     leftover: io.StringIO
     _line: str
     
+    @override
     def _seek_to_cut(self, buffer, size):
         self._line = buffer.readline(size)
     
+    @override
     def _read_limiter(self, buffer):
         return buffer.tell() > 0
     
@@ -113,6 +122,7 @@ class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
         super().read(size)
         return self._line
     
+    @override
     def read(self, size=-1, /) -> str:
         return super()._read(size).getvalue()
 
@@ -120,13 +130,16 @@ class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
 class RawIterStream(IterStream[io.BytesIO, bytes], io.RawIOBase):
     leftover: io.BytesIO
     
+    @override
     def _seek_to_cut(self, buffer, size):
         if size >= 0:
             buffer.seek(size)
     
+    @override
     def readall(self) -> bytes:
         return self.read()
     
+    @override
     def read(self, size=-1, /) -> bytes:
         return super()._read(size).getvalue()
 

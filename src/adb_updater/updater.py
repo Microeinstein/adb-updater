@@ -9,12 +9,11 @@ import tableprint as tp
 import libusb1
 from usb1 import USBError
 
-
 from .core.context import ContextProp, a_autoexit, with_all
 from .core.io import chunked_stream, open_or_create
 from .core.config import TOMLConfig
 from .core.ui import *
-from .core.misc import Dummy, round_robin
+from .core.misc import Dummy, round_robin, AttrDict
 from .android.phone import *
 from .android.apps import *
 from .android.fdroid import *
@@ -22,8 +21,14 @@ from .platform import Platform
 
 
 class UpdaterConfig(TOMLConfig):
-    ignore_pkg: list[str] = ['ignore.during.updates']
-    repos: list[dict[str, Any]] = []
+    ignore_pkg: set[str] = { 'ignore.during.updates' }
+    cache: AttrDict[Any] = dict(
+        apps = dict(
+            max_days = 30,
+            max_size = '1G',
+        ),
+    )
+    repos: list[FDroidRepo] = []
 
 
 class Updater:
@@ -31,7 +36,7 @@ class Updater:
     FDROID_DB = Platform.CACHE_DIR / Path(os.path.basename(FDROID_BKP_DB))
     
     phone: AndroidPhone = ContextProp()
-    ignore_pkg: list[str]
+    config: UpdaterConfig|Any
     repos: list[FDroidRepo]
     updates: dict[str, tuple[InstalledApp, FDroidApp]]
     missing: dict[str, InstalledApp]
@@ -56,19 +61,20 @@ class Updater:
         
         with open_or_create(Platform.CONFIG, 'r+t') as fconf:
             config = UpdaterConfig.load(fconf)
-            self.ignore_pkg = config.ignore_pkg
-        
-            repos = config.repos
-            if not repos:
-                repos = self.repos_from_backup()
-            else:
-                repos = (FDroidRepo.load(r) for r in repos)
-            self.repos = list(repos)
+            self.config = config
+            
+            # do not save on empty config and backup error,
+            # otherwise the TOML will result in a bad-looking array of tables
+            
+            self.repos = config.repos
+            if not self.repos:
+                config.repos = self.repos = list(self.repos_from_backup())
+            # else:
+            #     repos = list(FDroidRepo.load(r) for r in repos)
             
             # prepare for save
-            config.repos = list(r.save() for r in self.repos)
+            # config.repos = list(r.save() for r in self.repos)
             
-            # save changes
             fconf.seek(0)
             config.dump(fconf)
         
@@ -97,7 +103,7 @@ class Updater:
             nonlocal n
             valid = False
             
-            ign = app.package in self.ignore_pkg
+            ign = app.package in self.config.ignore_pkg
             n.total += 1
             n.system += int(app.system)
             n.removed += int(app.removed)
@@ -141,6 +147,7 @@ class Updater:
         title("Checking updates...")
         self.updates = {}
         self.missing = {}
+        force_num = 1
         
         for pkg, app in self.phone.apps.items():
             app: InstalledApp
@@ -153,10 +160,13 @@ class Updater:
                     continue
                 found = True
                 # app is found, but must also get latest version across repos
-                if repo_app.version_code <= app.version_code:
-                    continue
-                if pkg in self.updates and repo_app.version_code <= self.updates[pkg][1].version_code:
-                    continue
+                if force_num > 0 and repo_app.version_code == app.version_code:
+                    force_num -= 1
+                else:
+                    if repo_app.version_code <= app.version_code:
+                        continue
+                    if pkg in self.updates and repo_app.version_code <= self.updates[pkg][1].version_code:
+                        continue
 
                 self.updates[pkg] = (app, repo_app)
             
@@ -204,6 +214,12 @@ class Updater:
         title("Downloading...")
         num_parallel = 4
         queue: asyncio.Queue[FDroidApp|None] = asyncio.Queue(num_parallel)
+        
+        FDroidRepo.trim_apps_cache(
+            (upd for _inst, upd in self.updates.values()),
+            self.config.cache.apps.max_days,
+            self.config.cache.apps.max_size
+        )
         
         async def worker():
             while True:

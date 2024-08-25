@@ -3,17 +3,18 @@ import os, io
 
 from pathlib import Path
 from dataclasses import dataclass, field
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager, asynccontextmanager
+from datetime import datetime
 from typing import ClassVar
 
 import aiohttp, json_stream, simdjson
 
 from ..core.io import open_or_create
 from ..core.network import *
-from ..core.misc import jobj, jlist
+from ..core.misc import jobj, jlist, human_to_bytes, Serializable
 from ..core.context import SQLite
-from ..core.config import ConfigType, TOMLConfig
+from ..core.config import TOMLConfig
 from ..platform import Platform
 from .apps import *
 from .phone import AndroidPhone
@@ -24,7 +25,7 @@ class CacheInfo(TOMLConfig):
 
 
 @dataclass
-class FDroidRepo(ConfigType):
+class FDroidRepo(Serializable):
     SERIALIZE = ['name', 'address']
     JSON_INDEX_V1 = 'index-v1.json'
     JSON_ENTRY = 'entry.json'
@@ -33,7 +34,7 @@ class FDroidRepo(ConfigType):
     address: str
     cache_path: Path|None = field(init=False, default=None)
     apps: dict[str, "FDroidApp"] = field(init=False, default_factory=dict)
-    cache_info: ClassVar[CacheInfo]
+    cache_info: ClassVar[CacheInfo|Any]
     session: aiohttp.ClientSession|None = field(init=False, default=None)
 
 
@@ -45,6 +46,7 @@ class FDroidRepo(ConfigType):
             self.cache_path = base / self.JSON_INDEX_V1
             return
         
+        # find index_v2 index (name can vary)
         for _dirpath, _dirnames, filenames in os.walk(base):
             for f in filenames:
                 if f != self.JSON_ENTRY:
@@ -141,6 +143,50 @@ class FDroidRepo(ConfigType):
                     self.apps[pkg] = app
         
         print(f"  {self.name}... ok ({len(self.apps)})")
+    
+    
+    @classmethod
+    def trim_apps_cache(cls, updates: Iterable["FDroidApp"], max_days: int, max_size: str):
+        # map updates to file paths
+        no_clear = set()
+        for app in updates:    
+            src = rel_urljoin(app.repo.address, app.url)
+            dest = Platform.CACHE_APPS / url2path(src)
+            no_clear.add(dest)
+        
+        tot_size = 0
+        in_days: dict[str, os.stat_result] = dict()
+        now = datetime.now()
+        for dirpath, _dirnames, filenames in os.walk(Platform.CACHE_APPS):
+            for f in filenames:
+                f = os.path.join(dirpath, f)
+                if f in no_clear:
+                    continue
+                fstat = os.stat(f)
+                mdtime = datetime.fromtimestamp(fstat.st_mtime)
+                # 23 hours is counted as 0 days,
+                # 25 hours as 1 days, ecc
+                days = (now - mdtime).days
+                if days >= max_days:
+                    os.remove(f)
+                    continue
+                tot_size += fstat.st_size
+                in_days[f] = fstat
+        
+        if not tot_size:
+            return
+        max_size_b = human_to_bytes(max_size)
+        if tot_size <= max_size_b:
+            return
+        
+        in_days = sorted(in_days.items(), key=lambda x: x[1].st_mtime)
+        for f, fstat in in_days:
+            fstat: os.stat_result
+            if fstat.st_size > max_size_b:
+                os.remove(f)
+                tot_size -= fstat.st_size
+            if tot_size <= max_size_b:
+                return
     
     
     async def download_app(self, app: "FDroidApp") -> Path|None:

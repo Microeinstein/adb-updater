@@ -13,7 +13,15 @@
             "env": {
                 "PYTHONPATH": "./src"
             },
-            "justMyCode": true
+            "justMyCode": false
+        },
+        {
+            "name": "Snippet",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/trash/snippet.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }

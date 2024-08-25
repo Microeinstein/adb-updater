@@ -4,7 +4,8 @@ json-stream
 pysimdjson
 tomlkit
 libusb1
-cryptography
+cryptography==41.0.0
 colorama
 readchar
 tableprint
+typing_extensions
