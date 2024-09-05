@@ -147,7 +147,7 @@ class Updater:
         title("Checking updates...")
         self.updates = {}
         self.missing = {}
-        force_num = 1
+        force_num = 0  # for debugging
         
         for pkg, app in self.phone.apps.items():
             app: InstalledApp
