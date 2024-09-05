@@ -1,21 +1,17 @@
 #!/bin/bash
 
-set -euo pipefail
-# set -x
-
 SELF="$(realpath -ms "${BASH_SOURCE[0]}")"
 cd "$(dirname "$SELF")" || exit
-
-unset _JAVA_OPTIONS  # too much output for nothing
-clear
+source './.build_common.sh'
 
 
 # Project config & paths
+unset _JAVA_OPTIONS  # too much output for nothing
 
 JVM_VER=1.8
 SRC_VER=1.8
 MIN_API=29  # int
-SDK_VER=34  # int
+#SDK_VER=34  # int
 
 DIR_PROJ="$PWD"
 DIR_LIB="$DIR_PROJ/lib"
@@ -26,35 +22,43 @@ PROJ_BIN=lister.jar
 PROJ_PKG=net.micro.adb.Lister
 PROJ_MAIN="$PROJ_PKG.Lister"
 
+config() {
+    # SDK paths
+    SDK="${ANDROID_HOME:-/opt/android-sdk}"
 
-# SDK paths
+    if [[ -v SDK_VER ]]; then
+        SDK_BUILD="$SDK/build-tools/${SDK_VER}.0.0"
+    elif [[ -d "$SDK/build-tools" ]]; then
+        local lastver="$(ls -1 "$SDK/build-tools" | sort | tail -n1)"
+        SDK_BUILD="$SDK/build-tools/${lastver}"
+    fi
 
-SDK="${ANDROID_HOME:-/opt/android-sdk}"
-SDK_BUILD="$SDK/build-tools/${SDK_VER}.0.0"
-SDK_PLAT="$SDK/platforms/android-${SDK_VER}"
-SDK_TOOLS="$SDK/platforms-tools"
+    if ! [[ -v SDK_VER ]] && [[ -d "$SDK/platforms" ]]; then
+        local lastver="$(ls -1 "$SDK/platforms" | sort | tail -n1)"
+        SDK_VER="${lastver#android-}"
+    fi
+    SDK_PLAT="$SDK/platforms/android-${SDK_VER}"
+    SDK_TOOLS="$SDK/platforms-tools"
 
-LIB_ANDROID="$SDK_PLAT/android.jar"
-LIB_LAMBDA="$SDK_BUILD/core-lambda-stubs.jar"
-LIB_FRAMEWORK="$DIR_LIB/framework.jar"
-# LIB_CORE_OJ="$DIR_LIB/core-oj.jar"
+    LIB_ANDROID="$SDK_PLAT/android.jar"
+    LIB_LAMBDA="$SDK_BUILD/core-lambda-stubs.jar"
+    LIB_FRAMEWORK="$DIR_LIB/framework.jar"
+    # LIB_CORE_OJ="$DIR_LIB/core-oj.jar"
 
-
-cat <<EOF
+    cat <<EOF
 Build dir   : $DIR_BUILD
 Platform    : $SDK_PLAT
 Build tools : $SDK_BUILD
 EOF
 
+    # Basic checks
+    if [[ ! -d "$SDK_BUILD" || ! -d "$SDK_PLAT" ]]; then
+        echo "Android SDK not found."
+        exit 1
+    fi
 
-# Basic checks
-
-if [[ ! -d "$SDK_BUILD" || ! -d "$SDK_PLAT" ]]; then
-    echo "Android SDK not found."
-    exit 1
-fi
-
-export PATH="$SDK_BUILD:$SDK_TOOLS:$PATH"
+    export PATH="$SDK_BUILD:$SDK_TOOLS:$PATH"
+}
 
 
 all_installed() {
@@ -264,7 +268,28 @@ add_resources() (
 )
 
 
-adb_execute() {
+target_jar() {
+    local src=()
+    local libs=()
+    
+    config
+    reset
+    # BOOTCLASSPATH
+    # SYSTEMSERVERCLASSPATH
+    get_phone_lib '/system/framework/framework.jar'
+    # get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
+    generate_buildconfig
+    find_sources
+    compile_aidl
+    compile_java
+    compile_dex
+    add_resources
+    
+    title "Server generated in $DIR_BUILD/$PROJ_BIN"
+}
+
+
+target_run() {
     title 'Executing on phone...'
     check_bin_deps  adb
     
@@ -286,29 +311,5 @@ adb_execute() {
 }
 
 
-main() {
-    if (($#)); then
-        "$@"
-        return
-    fi
-    
-    local src=()
-    local libs=()
-    
-    reset
-    # BOOTCLASSPATH
-    # SYSTEMSERVERCLASSPATH
-    get_phone_lib '/system/framework/framework.jar'
-    # get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
-    generate_buildconfig
-    find_sources
-    compile_aidl
-    compile_java
-    compile_dex
-    add_resources
-    
-    title "Server generated in $DIR_BUILD/$PROJ_BIN"
-    # adb_execute
-}
-
+_command_0=(target_jar)
 main "$@"

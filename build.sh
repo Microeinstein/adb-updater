@@ -1,7 +1,9 @@
 #!/bin/bash
 
-SELF="$(realpath "${BASH_SOURCE[0]}")"
+SELF="$(realpath -ms "${BASH_SOURCE[0]}")"
 cd "$(dirname "$SELF")" || exit
+source './.build_common.sh'
+
 
 export PYTHONPATH="src"
 export PYTHONOPTIMIZE=2
@@ -9,9 +11,24 @@ MODULE=adb_updater
 RUNNER=adb-updater.py
 LISTER=dex-lister/build/lister.jar
 
-# reproducible builds
-export PYTHONHASHSEED=11893
-export SOURCE_DATE_EPOCH="$(git show -s --format=%ct)"  # last commit timestamp
+
+config() {
+    # reproducible builds
+    export PYTHONHASHSEED=11893
+    export SOURCE_DATE_EPOCH="$(git show -s --format=%ct)"  # last commit timestamp
+}
+
+conda_env() {
+    local conda_script="/opt/miniconda/etc/profile.d/conda.sh"
+    if [[ -f "$conda_script" ]]; then
+        source "$conda_script"
+        if [[ -d venv ]]; then
+            conda activate ./venv
+        else
+            conda activate "../../Venv/$(basename "$PWD")"
+        fi
+    fi
+}
 
 
 with_nuitka() {
@@ -66,4 +83,18 @@ with_pyinstaller() {
 }
 
 
-with_pyinstaller "$@"
+target_dist() {
+    config
+    conda_env
+    with_pyinstaller "$@"
+}
+
+
+target_run() {
+    conda_env
+    python -m "$MODULE" "$@"
+}
+
+
+_command_0=(target_dist)
+main "$@"

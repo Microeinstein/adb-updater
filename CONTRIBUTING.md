@@ -1,79 +1,82 @@
 # Contributing to adb-updater
 
-## Preparation
+## Workflow
 
 1. clone this repository
 
-```nginx
-git clone --recurse-submodules 'https://github.com/Microeinstein/adb-updater.git'
-# or
-git clone --recurse-submodules 'git@github.com:Microeinstein/adb-updater.git'
-```
+   ```nginx
+   git clone --recurse-submodules 'https://github.com/Microeinstein/adb-updater.git'
+   # or
+   git clone --recurse-submodules 'git@github.com:Microeinstein/adb-updater.git'
+   ```
 
-### Local build preparation
+### Local machine (posix)
 
-2. create a virtual environment (recommended);<br>
+2. [build the lister helper](../dex-lister)
+
+3. create a virtual environment (recommended);<br>
    I suggest using an env which supports native packages other than pip ones, like miniconda
 
-```nginx
-conda create -p './venv'
-conda activate './venv'
-conda install  python=3.10  libpython-static=3.10
-pip install -r 'requirements.txt'
-pip install pyinstaller
-```
+   ```nginx
+   conda create -p './venv'
+   conda activate './venv'
+   conda install  python=3.10  libpython-static=3.10
+   pip install -r 'requirements.txt'
+   pip install pyinstaller
+   ```
 
-3. build the lister helper
+4. do your hacking on your favorite IDE/editor;<br>
+   I personally use VSCodium <sub><i>with ms extensions</i></sub> for the whole project
 
-## Actions
+4. build the project
 
-<table><tbody>
-<tr><td valign="top">
-<sup><h3>Local build</h3></sup>
-</td><td>
+   ```nginx
+   # check the script for other flags
+   bash build.sh;  # --clean --onefile
+   ```
 
-```nginx
-# make sure to activate your virtual environment
-# check the script for other flags
-bash build.sh  # --clean --onefile
-```
+5. run the project
 
-</td></tr>
-<tr></tr>
-<tr><td valign="top">
-<sup><h3>&emsp;&ensp;Running</h3></sup>
-</td><td>
+   ```nginx
+   bash build.sh  run
+   # or
+   export PYTHONPATH="./src"
+   python -m adb_updater;  # ...
+   ```
 
-```nginx
-export PYTHONPATH="./src"
-python -m adb_updater  # ...
-```
+### Local machine (Windows)
 
-</td></tr>
-<tr></tr>
-<tr><td valign="top">
-<sup><h3>Docker build</h3></sup>
-</td><td>
+It is suggested to use bash from [Git for Windows](https://github.com/git-for-windows/git/releases), which is taken from MSYS2;<br>
+last (un)official working versions for Windows 7:
 
-```nginx
-# install: docker  docker-buildx
-docker --debug  build -t adb-updater  '.'
-```
+- Git for Windows — [v2.46.0.windows.1](https://github.com/git-for-windows/git/releases/tag/v2.46.0.windows.1)
+- Python 3.10 — [custom fork](https://github.com/adang1345/PythonWin7)
+   - `cryptography==41.0.0`
 
-</td></tr>
-<tr></tr>
-<tr><td valign="top">
-<sup><h3>&emsp;&ensp;Running</h3></sup>
-</td><td>
+---
 
-```nginx
-# connect your phone and check for the usb path
-lsusb
-docker run -it --device=/dev/bus/usb/BUS/DEV  adb-updater:latest
-```
+2. [build the lister helper](../dex-lister)
 
-</td></tr>
-</tbody></table>
+### Docker
 
+The current [Dockerfile](Dockerfile) makes use of<br>
+- `archlinux` image + AUR for Android SDK and lister building,
+- `python:3.10.12-slim-buster` image for project building,
+- `debian:buster-slim` for project running.
 
+A new adbkey will be generated at the last layer.
 
+2. build all
+
+   ```nginx
+   # install: docker  docker-buildx
+   docker --debug  build -t adb-updater  '.'
+   ```
+
+3. run the project
+
+   ```nginx
+   # connect your phone and check for the usb path
+   lsusb
+   docker run -it --device=/dev/bus/usb/BUS/DEV  adb-updater:latest
+   ```

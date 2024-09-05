@@ -3,7 +3,7 @@ import os, sys
 
 import colorama
 import readchar as rc
-from colorama import ansi  # type: ignore[unused] (import from here to init library)
+from colorama import ansi  # pyright: ignore[reportUnusedImport] (import from here to init library)
 
 
 colorama.init()

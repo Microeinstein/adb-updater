@@ -107,7 +107,7 @@ class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
     def _read_limiter(self, buffer):
         return buffer.tell() > 0
     
-    def readlines(self, hint=-1, /) -> list[str]:  # type: ignore[override]
+    def readlines(self, hint=-1, /) -> list[str]:  # pyright: ignore[reportIncompatibleMethodOverride, reportImplicitOverride]
         lines = []
         while hint != 0:
             line = self.readline()
@@ -118,7 +118,7 @@ class TextIterStream(IterStream[io.StringIO, str], io.TextIOBase):
             lines.append(line)
         return lines
     
-    def readline(self, size=-1, /) -> str:  # type: ignore[override]
+    def readline(self, size=-1, /) -> str:  # pyright: ignore[reportIncompatibleMethodOverride, reportImplicitOverride]
         super().read(size)
         return self._line
     

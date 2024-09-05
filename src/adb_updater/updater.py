@@ -303,11 +303,11 @@ class Updater:
             error(ex.args[0])
             
         except USBError as ex:
-            if ex.value == libusb1.LIBUSB_ERROR_BUSY:  # type: ignore[enum]
+            if ex.value == libusb1.LIBUSB_ERROR_BUSY:  # pyright: ignore[reportAttributeAccessIssue]
                 error("Phone is busy, make sure adb is not running (adb kill-server).")
-            elif ex.value == libusb1.LIBUSB_ERROR_NO_DEVICE:  # type: ignore[enum]
+            elif ex.value == libusb1.LIBUSB_ERROR_NO_DEVICE:  # pyright: ignore[reportAttributeAccessIssue]
                 error("No phone found :(")
-            elif ex.value == libusb1.LIBUSB_ERROR_TIMEOUT:  # type: ignore[enum]
+            elif ex.value == libusb1.LIBUSB_ERROR_TIMEOUT:  # pyright: ignore[reportAttributeAccessIssue]
                 error("Connection timeout :(")
             else:
                 error("Unknown error :(")

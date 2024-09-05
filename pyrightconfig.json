@@ -25,6 +25,7 @@
     "reportUnusedCoroutine": "warning",
     "reportUnusedVariable": "warning",
     "reportUnusedExpression": "warning",
+    "reportUnusedParameter": "warning",
     "reportUnnecessaryIsInstance": "warning",
     "reportUnnecessaryCast": "warning",
 

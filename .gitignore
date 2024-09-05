@@ -1,14 +1,15 @@
 # compatible as dockerignore
+
+# generic, hidden
 **/.*
 **/*.code-workspace
 **/*.egg-info
 **/*.spec
 
-**/config.toml
-
+# generic
+**/__pycache__/
 **/notes/
 **/trash/
-**/__pycache__/
 **/venv/
 **/typings/
 **/cache/
@@ -17,3 +18,6 @@
 **/lib/
 **/bin/*
 !**/bin/*.sh
+
+# specific
+**/config.toml

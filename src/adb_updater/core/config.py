@@ -3,7 +3,6 @@ from typing import TypeVar
 
 import tomlkit
 from tomlkit.toml_document import TOMLDocument
-from tomlkit.items import Item
 from .misc import AttrDict
 
 T = TypeVar('T')

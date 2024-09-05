@@ -4,7 +4,8 @@ Command line tool to update all your third-party installed apps on your Android 
 
 ## Gallery
 
-TODO
+<img src="/.repo/linux_1.png" alt="Updating repositories" width="50.5%"> <img src="/.repo/linux_2.png" alt="Showing updates" width="48.2%"><br>
+<img src="/.repo/win7_1.png" alt="Showing updates" width="49.5%"> <img src="/.repo/win7_2.png" alt="Updating apps after confirmation" width="49.5%"><br>
 
 ## Background
 
@@ -23,7 +24,9 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 - [x] ask to backup F-Droid when no repositories are configured
 - [x] generate adbkey when missing
 - [x] asynchronous download when possible
-- [x] cache HTTP ETag for repositories indices
+- [x] caching
+    - [x] repositories indices, using HTTP ETag
+    - [x] apps to update multiple phones in a row (tunable)
 - [x] check app compatibility
     - [x] phone CPU and SDK version
     - [x] app signature and version
@@ -33,33 +36,43 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 - [x] respect the [XDG Base Directory specification](https://wiki.archlinux.org/title/XDG_Base_Directory) 
 - [x] cross platform
 
-## Current limitations
+## Backlog
 
-- no command line arguments
-- no direct downloads support
-- only 1 device at a time
-- no network adb, only through USB
-- no self auto-update
-- untested on macOS
-- untested on Android lower than 10
+- [ ] command line arguments
+- [ ] direct downloads support
+- [ ] more than 1 device simultaneously
+- [ ] network adb
+- [ ] handle small-width terminals
+- [ ] support other type of sources like [Obtanium](https://github.com/ImranR98/Obtainium)?
+- [ ] CI/CD
+    - [ ] build on Windows 10 using [PythonWin7](https://github.com/adang1345/PythonWin7), test on Windows 7
+- [ ] test on macOS
+- [ ] test on Android lower than 10
+
+## Unplanned
+
+- [ ] self auto-update
 
 ## Download
 
-#### x86-64
+See [releases](https://github.com/Microeinstein/adb-updater/releases).
 
+<!--
+#### x86-64
 
 | Windows  |   Unix   | macOS / _unlisted_ | Other  |
 | :------: | :------: | :----------------: | :----: |
 | Portable |  Binary  | _try Unix binary_  | Docker |
 |          | AppImage |                    |        |
+-->
 
-If you want to distribute this project through other channels _and maintain those packages_, feel free to reach out.
+If you want to distribute _and maintain_ other packages of this project for other channels, feel free to reach out.
 
 ## Configuration
 
 | Distribution       | Location                                |
 | ------------------ | --------------------------------------- |
-| Unix / macOS       | `$HOME/.config/adb-updater/config.toml` |
+| Posix              | `$HOME/.config/adb-updater/config.toml` |
 | Windows (portable) | `.\config\config.toml`                  |
 
 ```toml
@@ -69,8 +82,9 @@ ignore_pkg = [
 ]
 
 # Max cache days for each downloaded apps
-apk_max_days = 1
-# TODO: other cache options
+[cache.apps]
+max_days = 30
+max_size = "1G"
 
 # Configured repositories, descending order of priority
 [[repos]]
@@ -86,35 +100,59 @@ address = "https://f-droid.org/repo/"
 
 ## Dependencies
 
-| Name                           | Usage                                   | Notes                                                        |
-| ------------------------------ | --------------------------------------- | ------------------------------------------------------------ |
-| **Resources**                  |                                         |                                                              |
-| &emsp;[lister helper jar](dex-lister) | get phone information                   |                                                              |
-| **Python** 3.10                |                                         |                                                              |
-| &emsp;`pyinstaller`            | linux and windows binaries              | dev only                                                     |
-| &emsp;`cx-freeze`              |                                         | dev only                                                     |
-| &emsp;`python-adb`             | phone interaction                       | git submodule; [a fork](https://github.com/MasonAmerica/python-adb) of this [project](https://github.com/google/python-adb) |
-| &emsp;&emsp;`libusb1`          | raw USB management (wrapper)            |                                                              |
-| &emsp;`tomlkit`                | configuration                           |                                                              |
-| &emsp;`pysimdjson`             | extremely fast json files parsing       |                                                              |
-| &emsp;`json-stream`            | json streams parsing                    |                                                              |
-| &emsp;`colorama`               | cross-platform support for ANSI escapes |                                                              |
-| &emsp;`tableprint`             | terminal tables                         |                                                              |
-| &emsp;`readchar`               | raw user input                          |                                                              |
-| &emsp;`aiohttp`                | asynchronous HTTP requests              |                                                              |
-| &emsp;`certifi`                | static mozilla certificates             | optional                                                     |
-| **Native**                     | all imported dependencies |                                                              |
-| &emsp;`glibc`                         |                                         | linux only? |
-| &emsp;`zlib`                  |                       | linux only? |
-| &emsp;`libpthread`                  |                       | linux only? |
-| &emsp;`ca-certificates`        | system certificates                     | optional, linux only                                       |
-| &emsp;`libusb` 1.0.0           | raw USB management                      |                                                              |
+<details><summary><b>Resources</b></summary>
 
-> [!NOTE]
-> PyInstaller freezes all python code (even the interpreter) and it bundles most native libraries, some of which are not visible through `ldd`.
+| Name                            | Usage                 | Notes |
+| ------------------------------- | --------------------- | ----- |
+| [lister helper jar](dex-lister) | get phone information |       |
 
-> [!NOTE]
-> Since ABIs are forward compatible but not backward compatible, it's optimal to compile the project with the oldest `glibc` version possible, like 2.28 present in Debian Buster. The same may apply to other native libraries. See [PyInstaller docs](https://pyinstaller.org/en/stable/usage.html#making-gnu-linux-apps-forward-compatible) for more information.
+</details>
+
+<details><summary><b>Python</b> 3.10</summary>
+
+| Name            | Usage                                   | Notes                                                                                                                       |
+| --------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `pyinstaller`   | linux and windows binaries              | dev only                                                                                                                    |
+| `python-adb`    | phone interaction                       | git submodule; [a fork](https://github.com/MasonAmerica/python-adb) of this [project](https://github.com/google/python-adb) |
+| &emsp;`libusb1` | raw USB management (wrapper)            |                                                                                                                             |
+| `tomlkit`       | configuration                           |                                                                                                                             |
+| `pysimdjson`    | extremely fast json files parsing       |                                                                                                                             |
+| `json-stream`   | json streams parsing                    |                                                                                                                             |
+| `colorama`      | cross-platform support for ANSI escapes |                                                                                                                             |
+| `tableprint`    | terminal tables                         |                                                                                                                             |
+| `readchar`      | raw user input                          |                                                                                                                             |
+| `aiohttp`       | asynchronous HTTP requests              |                                                                                                                             |
+| `certifi`       | static mozilla certificates             | optional                                                                                                                    |
+
+</details>
+
+<details><summary><b>Native</b> (all OS)</summary>
+
+| Name           | Notes |
+| -------------- | ----- |
+| `libusb` 1.0.0 |       |
+
+</details>
+
+<details><summary><b>Native</b> (posix)</summary>
+
+| Name              | Notes     |
+| ----------------- | --------- |
+| `glibc`           | see below |
+| `zlib`            |           |
+| `libpthread`      |           |
+| `ca-certificates` | optional  |
+
+</details>
+
+### Platform notes
+
+- PyInstaller freezes all python code (even the interpreter) and it bundles most native libraries, some of which are not visible through `ldd`.
+
+- Since ABIs are forward compatible but not backward compatible, it's optimal to compile the project with the oldest `glibc` version possible, like 2.28 present in Debian Buster. The same may apply to other native libraries. See [PyInstaller docs](https://pyinstaller.org/en/stable/usage.html#making-gnu-linux-apps-forward-compatible) for more information.
+
+- On Windows 7 you may (must?) need to install update KB2533623 or KB3063858,<br>
+  as per [this fork of Python 3.10](https://github.com/adang1345/PythonWin7).
 
 ## Development
 

@@ -109,7 +109,7 @@ wget() { command wget --no-verbose --show-progress --progress=dot:giga "$@"; }
 export -f wget
 
 echo "Building dex-lister"
-bash dex-lister/compile.sh
+bash dex-lister/build.sh
 EOF
 
 
