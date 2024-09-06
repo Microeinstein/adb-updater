@@ -73,7 +73,7 @@ FROM android_env  AS android_proj
 
 USER root
 WORKDIR /project
-COPY --parents  bin  foreign  dex-lister  ./
+COPY --parents  .*.sh  bin  foreign  dex-lister  ./
 
 RUN <<EOF
 set -euo pipefail
@@ -144,14 +144,14 @@ COPY . .
 COPY --link --parents --from=build_lister  \
     /project/dex-lister/build/lister.jar   /
 
-RUN bash build.sh  --clean --onefile
+RUN bash build.sh  --clean
 
 
 #######################################
 FROM debian:buster-slim  AS release
 
 COPY --link --from=build_proj  \
-    /project/dist/adb-updater  /bin/
+    /project/dist  /dist
 
 RUN --mount=type=cache,target=/var/cache/apt <<EOF
 set -eu
@@ -161,8 +161,8 @@ EOF
 
 RUN <<EOF
 set -eu
-adb-updater || :  # generate adbkey
+/dist/adb-updater/adb-updater || :  # generate adbkey
 stat /root/.android/adbkey
 EOF
 
-CMD ["adb-updater"]
+CMD ["/dist/adb-updater/adb-updater"]

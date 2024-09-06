@@ -39,6 +39,9 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 ## Backlog
 
 - [ ] command line arguments
+- [ ] improve UX
+- [ ] add default repositories
+- [ ] make f-droid backup optional
 - [ ] direct downloads support
 - [ ] more than 1 device simultaneously
 - [ ] network adb
@@ -58,15 +61,30 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 See [releases](https://github.com/Microeinstein/adb-updater/releases).
 
 <!--
-#### x86-64
+<details open><summary><b>x86-64</b></summary>
 
-| Windows  |   Unix   | macOS / _unlisted_ | Other  |
-| :------: | :------: | :----------------: | :----: |
-| Portable |  Binary  | _try Unix binary_  | Docker |
-|          | AppImage |                    |        |
+| Windows  |  Unix  | macOS / _unlisted_ |
+| :------: | :----: | :----------------: |
+| Portable | Binary | _try Unix binary_  |
+
+[Portable](https://github.com/Microeinstein/adb-updater/releases/download/v0.1/adb-updater-0.1-windows-x86-64.zip)
+
+</details>
 -->
 
 If you want to distribute _and maintain_ other packages of this project for other channels, feel free to reach out.
+
+## Usage
+
+1. open a terminal
+1. `./adb-updater` <sub>(in the program directory, if not added to PATH)</sub>
+1. if no repositories are configured, a backup of F-Droid from your phone must be made
+1. _wait for repositories syncing_
+1. _wait for phone apps scanning_
+1. results will be printed, press <kbd>Y</kbd> if you want to proceed
+1. _wait for apps downloading_
+1. _wait for apps installation_
+1. profit
 
 ## Configuration
 
