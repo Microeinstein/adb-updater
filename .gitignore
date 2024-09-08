@@ -17,8 +17,10 @@
 **/dist/
 **/lib/
 **/bin/*
-!**/*.sh
-!**/.*.sh
 
 # specific
 **/config.toml
+
+# unignore
+!**/.*.sh
+!**/*.sh

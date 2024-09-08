@@ -17,10 +17,10 @@ from .apps import InstalledApp
 # NOTE: adb_commands.AdbCommands.BytesStreamingShell requires a byte-format command
 
 
-class AndroidPhone:
+class AndroidDevice:
     TMP = '/data/local/tmp'
     
-    device: adb_commands.AdbCommands|None = PropMessage("Phone is not connected.")
+    device: adb_commands.AdbCommands|None = PropMessage("Device is not connected.")
     model: str
     arch: str
     supported_abis: list[str]
@@ -32,18 +32,22 @@ class AndroidPhone:
     @staticmethod
     def get_adbkey():
         local_key = os.path.expanduser('~/.android/adbkey')
+        os.makedirs(os.path.dirname(local_key), exist_ok=True)
         
         if not Path(local_key).exists():
-            os.makedirs(os.path.dirname(local_key), exist_ok=True)
             adbkey.keygen(local_key)
+        
+        local_pub = local_key + '.pub'
+        if not Path(local_pub).exists():  # only private exists
+            adbkey.write_public_keyfile(local_key, local_pub)
         
         return sign_cryptography.CryptographySigner(local_key)
 
 
     def __enter__(self):
         save_cursor()
-        title("Connecting to phone...")
-        signer = AndroidPhone.get_adbkey()
+        title("Connecting to device...")
+        signer = AndroidDevice.get_adbkey()
         
         while True:
             try:
@@ -66,7 +70,7 @@ class AndroidPhone:
 
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        title("Disconnecting from phone...")
+        title("Disconnecting from device...")
         if self.device:
             self.device.Close()
             self.device = None
@@ -90,10 +94,10 @@ class AndroidPhone:
         return TextIterStream(text_iter)
     
     
-    def load_phone_info(self, app_filter: Callable[[InstalledApp], bool]|None = None):
+    def load_device_info(self, app_filter: Callable[[InstalledApp], bool]|None = None):
         assert self.device
         lister_fn = os.path.basename(Platform.LISTER_JAR)
-        dest = f"{AndroidPhone.TMP}/{lister_fn}"
+        dest = f"{AndroidDevice.TMP}/{lister_fn}"
         
         save_cursor()
         print('Awaiting response from device...')
@@ -113,7 +117,7 @@ class AndroidPhone:
         # use simdjson, but it requires disk usage
         raw = RawIterStream(raw_iter)
         gz = GzipDecompStream(raw)
-        cache = Platform.CACHE_DIR / 'phone_apps.json'
+        cache = Platform.CACHE_DIR / 'device_apps.json'
         with open(cache, 'wb') as fout:
             for chunk in chunked_stream(gz):
                 fout.write(chunk)
@@ -128,7 +132,7 @@ class AndroidPhone:
             if not app_filter or app_filter(v):
                 apps[k] = v
         
-        ph: jobj[...] = js['phone']
+        ph: jobj[...] = js['device']
         bu: jobj[...] = ph['build']
         
         self.__dict__.update(dict(

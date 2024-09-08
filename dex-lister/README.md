@@ -1,6 +1,6 @@
 # Lister
 
-Helper to retrieve phone information through adb.
+Helper to retrieve device information through adb.
 
 This is a fake APK — a simple JAR with dexed classes and empty manifest, launched with the following procedure:
 
@@ -27,7 +27,7 @@ At the time of writing, Android has no ADB tool to retrieve a list of packages w
 | Java JDK              | 8         |                                                                                          |
 | Google Gson           | 2.10.1    | [jar download](https://mavenlibs.com/jar/file/com.google.code.gson/gson)                 |
 
-The build script can retrieve the framework jar from your phone for development purposes,
+The build script can retrieve the framework jar from your device for development purposes,
 but it's discouraged for distribution since it can contain specific vendor methods.
 
 Instead, use [this script](../bin/get-lineageos-libs.sh) which downloads the latest LineageOS OTA update for Pixel 4 "flame",

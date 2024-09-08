@@ -1,6 +1,6 @@
 # adb-updater
 
-Command line tool to update all your third-party installed apps on your Android phone, using F-Droid repositories.
+Command line tool to update all third-party installed apps on your Android device, using F-Droid repositories.
 
 ## Gallery
 
@@ -11,7 +11,7 @@ Command line tool to update all your third-party installed apps on your Android 
 
 Stock Android ROMs never allowed any non-system app (like F-Droid or any other store) to install updates, without prompting the user for confirmation _for every single app_ — imagine having 40 updates, you have to **wait** for a popup to appear, press Yes, hope your ROM does not complain about something, then repeat for all other apps (not including the eventual <kbd>Download</kbd> press and the <kbd>Install</kbd> press, **that's 200 user interactions!**).
 
-Of course one could root their phone, but that's not always possible, at least without breaking some apps and not making them show warnings (DRMs, home banking, etc...).
+Of course one could root their device, but that's not always possible, at least without breaking some apps and not making them show warnings (DRMs, home banking, etc...).
 
 One way is possible though: installing apps through ADB — this method does not require any user interaction (excluding manual compatibility checks and download of course), so I decided to exploit that.
 
@@ -26,9 +26,9 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 - [x] asynchronous download when possible
 - [x] caching
     - [x] repositories indices, using HTTP ETag
-    - [x] apps to update multiple phones in a row (tunable)
+    - [x] apps to update multiple devices in a row (tunable)
 - [x] check app compatibility
-    - [x] phone CPU and SDK version
+    - [x] device CPU and SDK version
     - [x] app signature and version
 - [x] ignore updates for certain apps
 - [x] reasonably fast searching for compatible updates
@@ -40,8 +40,8 @@ A similar way is to gain shell permissions through ADB and launch a local servic
 
 - [ ] command line arguments
 - [ ] improve UX
-- [ ] add default repositories
-- [ ] make f-droid backup optional
+- [x] add default repositories
+- [x] make f-droid backup optional
 - [ ] direct downloads support
 - [ ] more than 1 device simultaneously
 - [ ] network adb
@@ -78,9 +78,9 @@ If you want to distribute _and maintain_ other packages of this project for othe
 
 1. open a terminal
 1. `./adb-updater` <sub>(in the program directory, if not added to PATH)</sub>
-1. if no repositories are configured, a backup of F-Droid from your phone must be made
+1. if no repositories are configured, a backup of F-Droid from your device must be made
 1. _wait for repositories syncing_
-1. _wait for phone apps scanning_
+1. _wait for device apps scanning_
 1. results will be printed, press <kbd>Y</kbd> if you want to proceed
 1. _wait for apps downloading_
 1. _wait for apps installation_
@@ -122,7 +122,7 @@ address = "https://f-droid.org/repo/"
 
 | Name                            | Usage                 | Notes |
 | ------------------------------- | --------------------- | ----- |
-| [lister helper jar](dex-lister) | get phone information |       |
+| [lister helper jar](dex-lister) | get device information |       |
 
 </details>
 
@@ -131,7 +131,7 @@ address = "https://f-droid.org/repo/"
 | Name            | Usage                                   | Notes                                                                                                                       |
 | --------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `pyinstaller`   | linux and windows binaries              | dev only                                                                                                                    |
-| `python-adb`    | phone interaction                       | git submodule; [a fork](https://github.com/MasonAmerica/python-adb) of this [project](https://github.com/google/python-adb) |
+| `python-adb`    | device interaction                       | git submodule; [a fork](https://github.com/MasonAmerica/python-adb) of this [project](https://github.com/google/python-adb) |
 | &emsp;`libusb1` | raw USB management (wrapper)            |                                                                                                                             |
 | `tomlkit`       | configuration                           |                                                                                                                             |
 | `pysimdjson`    | extremely fast json files parsing       |                                                                                                                             |

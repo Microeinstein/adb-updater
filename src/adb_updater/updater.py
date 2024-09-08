@@ -14,7 +14,7 @@ from .core.io import chunked_stream, open_or_create
 from .core.config import TOMLConfig
 from .core.ui import *
 from .core.misc import Dummy, round_robin, AttrDict
-from .android.phone import *
+from .android.device import *
 from .android.apps import *
 from .android.fdroid import *
 from .platform import Platform
@@ -31,11 +31,17 @@ class UpdaterConfig(TOMLConfig):
     repos: list[FDroidRepo] = []
 
 
+DEFAULT_REPOS = [
+    dict(name="F-Droid Archive", address="https://f-droid.org/archive/"),
+    dict(name="F-Droid",         address="https://f-droid.org/repo/"),
+]
+
+
 class Updater:
     FDROID_BKP_DB = f'apps/{AndroidApp.FDROID_APP}/db/fdroid_db'
     FDROID_DB = Platform.CACHE_DIR / Path(os.path.basename(FDROID_BKP_DB))
     
-    phone: AndroidPhone = ContextProp()
+    device: AndroidDevice = ContextProp()
     config: UpdaterConfig|Any
     repos: list[FDroidRepo]
     updates: dict[str, tuple[InstalledApp, FDroidApp]]
@@ -44,14 +50,18 @@ class Updater:
 
     def repos_from_backup(self):
         if not self.FDROID_DB.is_file():
-            print("Getting FDroid database from phone... (requires manual confirm)")
+            print("Getting FDroid database from device... (requires manual confirm)")
             
-            with self.phone.get_package_backup(AndroidApp.FDROID_APP) as bkp, \
-                 open(self.FDROID_DB, 'wb') as fout:
-                
-                db_data: io.RawIOBase = AndroidPhone.get_file_from_backup(bkp, self.FDROID_BKP_DB)
-                for chunk in chunked_stream(db_data):
-                    fout.write(chunk)
+            try:
+                with self.device.get_package_backup(AndroidApp.FDROID_APP) as bkp, \
+                    open(self.FDROID_DB, 'wb') as fout:
+                    
+                    db_data: io.RawIOBase = AndroidDevice.get_file_from_backup(bkp, self.FDROID_BKP_DB)
+                    for chunk in chunked_stream(db_data):
+                        fout.write(chunk)
+            except Exception as e:
+                os.remove(self.FDROID_DB)
+                raise e
     
         return FDroidRepo.read_from_backup(self.FDROID_DB)
 
@@ -68,7 +78,12 @@ class Updater:
             
             self.repos = config.repos
             if not self.repos:
-                config.repos = self.repos = list(self.repos_from_backup())
+                if ask_yes_no(
+                    "No repositories. Do you want to extract them from F-Droid app in your device?\n" +
+                    "Otherwise default ones will be configured."):
+                    config.repos = self.repos = list(self.repos_from_backup())
+                else:
+                    config.repos = self.repos = list(map(lambda r: FDroidRepo(**r), DEFAULT_REPOS))
             # else:
             #     repos = list(FDroidRepo.load(r) for r in repos)
             
@@ -86,7 +101,7 @@ class Updater:
     def load_apps(self):
         title("Getting packages...")
         
-        # with self.phone.get_dumpsys_packages() as dump:
+        # with self.device.get_dumpsys_packages() as dump:
         #     dumpsys = TextIterStream(dumpsys)
         #     for app in InstalledApp._fetch_foreign_apps(dumpsys):
         #         self.apps[app.package] = app
@@ -114,7 +129,7 @@ class Updater:
                 
             return valid
         
-        self.phone.load_phone_info(app_filter)
+        self.device.load_device_info(app_filter)
         
         for k, v in (
             ('total', n.total),
@@ -141,7 +156,7 @@ class Updater:
         title("Loading repos apps...")
         
         async def upd(r: FDroidRepo):
-            r.load_repo_apps(self.phone)
+            r.load_repo_apps(self.device)
         await asyncio.gather(*[upd(r) for r in self.repos])
         
         title("Checking updates...")
@@ -149,7 +164,7 @@ class Updater:
         self.missing = {}
         force_num = 0  # for debugging
         
-        for pkg, app in self.phone.apps.items():
+        for pkg, app in self.device.apps.items():
             app: InstalledApp
             found = False
             
@@ -270,7 +285,7 @@ class Updater:
             print(f"  {upd.label} ({upd.version_name})...  ", end='', flush=True)
             try:
                 start = time.time()
-                self.phone.install_app(upd.local_path)
+                self.device.install_app(upd.local_path)
             except RuntimeError as e:
                 failed.append(upd)
                 print(f'FAIL ({e})')
@@ -304,9 +319,9 @@ class Updater:
             
         except USBError as ex:
             if ex.value == libusb1.LIBUSB_ERROR_BUSY:  # pyright: ignore[reportAttributeAccessIssue]
-                error("Phone is busy, make sure adb is not running (adb kill-server).")
+                error("Device is busy, make sure adb is not running (adb kill-server).")
             elif ex.value == libusb1.LIBUSB_ERROR_NO_DEVICE:  # pyright: ignore[reportAttributeAccessIssue]
-                error("No phone found :(")
+                error("No device found :(")
             elif ex.value == libusb1.LIBUSB_ERROR_TIMEOUT:  # pyright: ignore[reportAttributeAccessIssue]
                 error("Connection timeout :(")
             else:

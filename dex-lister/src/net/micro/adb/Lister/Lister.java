@@ -48,7 +48,7 @@ public final class Lister {
     
     static void delete_self() throws Exception {
         if (SELF.startsWith("/data/local/tmp") && SELF.endsWith(".jar")) {
-            // keep phone clean
+            // keep device clean
             new File(SELF).delete();
         }
     }
@@ -127,7 +127,7 @@ public final class Lister {
             jw.setSerializeNulls(true);
 
             jw.beginObject();
-            jw.name("phone"); print_phone_json();
+            jw.name("device"); print_device_json();
             jw.name("apps"); print_apps_json();
             jw.endObject();
             
@@ -136,7 +136,7 @@ public final class Lister {
         }
     }
 
-    void print_phone_json() throws Exception {
+    void print_device_json() throws Exception {
         jw.beginObject();
         jw.name("arch").value(System.getProperty("os.arch"));
         // jw.name("abi").value(Build.CPU_ABI);

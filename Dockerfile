@@ -127,7 +127,7 @@ RUN --mount=type=cache,target=/var/cache/apt  \
     <<EOF
 set -eu
 apt update
-apt -y install binutils
+apt -y install binutils git
 pip install --cache-dir "$PIP_CACHE_DIR" -r requirements.txt
 pip install --cache-dir "$PIP_CACHE_DIR" pyinstaller
 # do not embed these libraries

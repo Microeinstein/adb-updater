@@ -110,7 +110,7 @@ reset() {
 }
 
 
-get_phone_lib() (
+get_device_lib() (
     local lib="${1:?Missing library remote path.}"
     local nam
     nam="$(basename "$lib")"
@@ -118,7 +118,7 @@ get_phone_lib() (
     if [[ -f "$nam" ]]; then
         return
     fi
-    title "Getting $nam from phone..."
+    title "Getting $nam from device..."
     check_bin_deps  adb dex2jar
     
     adb pull "$lib" .
@@ -276,8 +276,8 @@ target_jar() {
     reset
     # BOOTCLASSPATH
     # SYSTEMSERVERCLASSPATH
-    get_phone_lib '/system/framework/framework.jar'
-    # get_phone_lib '/apex/com.android.runtime/javalib/core-oj.jar'
+    get_device_lib '/system/framework/framework.jar'
+    # get_device_lib '/apex/com.android.runtime/javalib/core-oj.jar'
     generate_buildconfig
     find_sources
     compile_aidl
@@ -290,7 +290,7 @@ target_jar() {
 
 
 target_run() {
-    title 'Executing on phone...'
+    title 'Executing on device...'
     check_bin_deps  adb
     
     local tmp='/data/local/tmp'

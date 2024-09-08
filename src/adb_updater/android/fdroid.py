@@ -17,7 +17,7 @@ from ..core.context import SQLite
 from ..core.config import TOMLConfig
 from ..platform import Platform
 from .apps import *
-from .phone import AndroidPhone
+from .device import AndroidDevice
 
 
 class CacheInfo(TOMLConfig):
@@ -113,7 +113,7 @@ class FDroidRepo(Serializable):
                 return
 
 
-    def load_repo_apps(self, phone: AndroidPhone):
+    def load_repo_apps(self, device: AndroidDevice):
         if not self.cache_path or not self.cache_path.is_file():
             return
         
@@ -128,8 +128,8 @@ class FDroidRepo(Serializable):
                 packages = json_like['packages'],
                 apps     = json_like['apps'],
             )
-            for pkg, iapp in phone.apps.items():
-                app = FDroidApp.from_index_v1(self, pkg, json_like, phone, iapp)
+            for pkg, iapp in device.apps.items():
+                app = FDroidApp.from_index_v1(self, pkg, json_like, device, iapp)
                 if app:
                     self.apps[pkg] = app
         
@@ -137,8 +137,8 @@ class FDroidRepo(Serializable):
             # with open(self.cache_path, 'r') as fin:
             #     json_like = json_stream.load(fin, persistent=True)
             json_like = parser.load(self.cache_path)
-            for pkg, iapp in phone.apps.items():
-                app = FDroidApp.from_index_v2(self, pkg, json_like, phone, iapp)
+            for pkg, iapp in device.apps.items():
+                app = FDroidApp.from_index_v2(self, pkg, json_like, device, iapp)
                 if app:
                     self.apps[pkg] = app
         
@@ -208,7 +208,7 @@ class FDroidApp(AndroidApp):
     
     
     @classmethod
-    def from_index_v2(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], phone: AndroidPhone, iapp: InstalledApp) -> "FDroidApp|None":
+    def from_index_v2(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], device: AndroidDevice, iapp: InstalledApp) -> "FDroidApp|None":
         package: jobj[...] = json_like['packages'].get(pkg)
         if not package:
             return None
@@ -224,7 +224,7 @@ class FDroidApp(AndroidApp):
                 nativecode   = list(manifest.get('nativecode', [])),
             )
             
-            if iapp.is_compatible(**verinfo) and phone.is_compatible(**verinfo):
+            if iapp.is_compatible(**verinfo) and device.is_compatible(**verinfo):
                 break
         else:
             return None
@@ -242,7 +242,7 @@ class FDroidApp(AndroidApp):
     
     
     @classmethod
-    def from_index_v1(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], phone: AndroidPhone, iapp: InstalledApp) -> "FDroidApp|None":
+    def from_index_v1(cls, repo: FDroidRepo, pkg: str, json_like: jobj[...], device: AndroidDevice, iapp: InstalledApp) -> "FDroidApp|None":
         package: jlist[jobj[...]] = json_like['packages'].get(pkg)
         if not package:
             return None
@@ -257,7 +257,7 @@ class FDroidApp(AndroidApp):
                 nativecode   = list(last_compat.get('nativecode', [])),
             )
             
-            if iapp.is_compatible(**verinfo) and phone.is_compatible(**verinfo):
+            if iapp.is_compatible(**verinfo) and device.is_compatible(**verinfo):
                 break
         else:
             return None

@@ -83,10 +83,23 @@ with_pyinstaller() {
 }
 
 
-target_dist() {
+target_local() {
     config
     conda_env
     with_pyinstaller "$@"
+}
+
+
+target_docker() {
+    systemctl start docker
+    docker buildx du | tail -n4
+    local imgname='adb-updater'
+    docker --debug build -t "$imgname" .
+    local id
+    id="$(docker create "$imgname")"
+    docker export "$id" \
+    | bsdtar -czvf 'dist/adb-updater-ver-linux-x86-64.tgz' --include='dist/*' @-
+    docker rm "$id"
 }
 
 
@@ -96,5 +109,5 @@ target_run() {
 }
 
 
-_command_0=(target_dist)
+_command_0=(target_local)
 main "$@"

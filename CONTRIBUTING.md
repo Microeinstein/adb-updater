@@ -76,7 +76,7 @@ A new adbkey will be generated at the last layer.
 3. run the project
 
    ```nginx
-   # connect your phone and check for the usb path
+   # connect your device and check for the usb path
    lsusb
    docker run -it --device=/dev/bus/usb/BUS/DEV  adb-updater:latest
    ```
